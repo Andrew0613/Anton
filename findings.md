@@ -4,7 +4,12 @@
 
 - Anton should be a new repository.
 - Anton should own reusable harness execution and validation surfaces.
-- `codex-threads` should remain the memory/trace/insight backend and adapter target.
+- Anton v0 should center on:
+  - doctor
+  - task-state
+  - threads
+- execution-context resolution should first ship through `doctor --json`, not a separate v0 command
+- `codex-threads` should remain separate and should not define Anton’s product identity.
 
 ## Proven Problems Driving This Repo
 
@@ -17,11 +22,11 @@
 
 Anton should own:
 
-- entrypoint generation and checks
 - task-state lifecycle and validation
 - execution-context normalization
 - local/remote doctor checks
-- `codex-threads` adapter commands
+- a canonical repo contract declared through `anton.yaml`
+- a thin evidence-first threads surface
 
 Anton should not own yet:
 
@@ -29,3 +34,10 @@ Anton should not own yet:
 - job queueing
 - deploy/PR automation
 - full session indexing internals from `codex-threads`
+- threads-centric workflow as the center of v0
+
+## Contract Direction
+
+- repos should adapt to Anton through `anton.yaml`
+- canonical task bundles should live under `.anton/tasks/...`
+- legacy repo layout migration is downstream adoption work, not Anton v0 runtime scope

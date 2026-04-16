@@ -14,13 +14,14 @@ It should make current cross-repo harness patterns executable and checkable with
 - reduce workflow drift between docs and implementation
 - make task-state lifecycle machine-checkable
 - normalize execution context across local and remote environments
-- make `codex-threads` easier to use consistently across hosts and repos
+- give repos one explicit way to adapt to Anton through config
+- expose a stable evidence-first threads surface without redefining Anton around it
 
 ## Non-Goals
 
 - not a general-purpose orchestration daemon
 - not a PR/deploy platform
-- not a replacement for `codex-threads`
+- not a wrapper-first UX for `codex-threads`
 - not a monolithic “agent operating system”
 
 ## Primary Users
@@ -31,43 +32,27 @@ It should make current cross-repo harness patterns executable and checkable with
 
 ## Core Use Cases
 
-1. Validate a repo’s entrypoint contract.
-2. Bootstrap a new task bundle in a consistent shape.
-3. Render or check current task state.
-4. Resolve the current execution context for:
+1. Bootstrap a new task bundle in a consistent shape.
+2. Render or check current task state.
+3. Render a current execution contract for:
    - git worktree
    - repo root
    - workspace root
    - remote SSH target
-5. Run a stable `threads` surface without caring whether:
-   - `codex-threads` is on `PATH`
-   - the host needs an absolute binary path
-   - the source repo and data directory differ
-   - a shared mount needs a different Rust target dir
+4. Run stable harness doctor checks for local and remote execution surfaces.
+5. Read recent thread and evidence signals through one stable command surface.
 
 ## v0 Command Surface
 
 ### Doctor
 
 - `anton doctor`
-- `anton doctor repo`
-- `anton doctor remote`
-- `anton doctor threads`
 
 ### Task State
 
-- `anton task init`
-- `anton task pulse`
-- `anton task check`
-
-### Entrypoints
-
-- `anton entrypoint check`
-- `anton entrypoint sync`
-
-### Context
-
-- `anton context resolve`
+- `anton task-state init`
+- `anton task-state pulse`
+- `anton task-state check`
 
 ### Threads
 
@@ -77,20 +62,13 @@ It should make current cross-repo harness patterns executable and checkable with
 
 ## Required v0 Behaviors
 
-### Entry Points
-
-- check file existence
-- check line budgets
-- check required references
-- flag broken relative doc links
-- flag drift between generated and current content
-
 ### Task State
 
 - create required task bundle files
 - validate presence and basic schema
 - normalize machine metadata carefully
 - separate stable task identity from volatile machine-specific details
+- default to one canonical bundle layout
 
 ### Context Resolution
 
@@ -100,37 +78,58 @@ It should make current cross-repo harness patterns executable and checkable with
   - workspace-root non-git context
   - remote SSH target
 - emit a standard contract that can be pasted into agent prompts
+- make that contract available from `anton doctor --json`
+
+### Doctor
+
+- check whether the current repo and execution target satisfy minimum harness assumptions
+- flag remote reachability and obvious environment risks
+- flag missing writable paths or missing task-state prerequisites
+- expose the resolved Anton config contract in `doctor --json`
+- stay focused on harness health rather than external analytics tooling
 
 ### Threads Adapter
 
-- discover usable `codex-threads` invocation strategy
-- prefer direct binary use when available
-- support explicit source-dir execution when needed
-- support host-specific workarounds like local target dirs
+- discover a usable `codex-threads` invocation strategy
+- prefer on-PATH execution when available
+- detect common drift like “binary exists but is not on PATH”
+- keep output evidence-first and project-scoped by default
 
-## Adapter Model
+## Repo Contract Model
 
-Anton should support repo adapters.
+Anton runtime should stay canonical and config-driven.
 
-Each adapter can declare:
+A repo adapts to Anton by providing `anton.yaml`.
 
-- repo name
-- task bundle layout
-- entrypoint templates
-- validation hooks
-- context rules
-- optional thread project mapping
+`anton.yaml` can declare:
 
-The default adapter should be small and generic.
+- `entrypoint.path`
+- `tasks.root`
+- `threads.default_project_strategy`
+- `threads.workspace_roots`
 
-`euresis` and `PhysEdit` should become explicit adapters rather than hardcoded assumptions.
+Anton should not grow repo-specific runtime adapters for `euresis`, `PhysEdit`,
+or other downstream repos.
+
+Legacy repo layout migration is downstream adoption work. Anton v0 should not
+branch its runtime or roadmap around helping each existing repo migrate.
 
 ## Success Criteria
 
 Anton v0 is successful if it can:
 
 1. bootstrap a task bundle in a clean new repo
-2. check and sync entrypoint docs in at least one real repo
-3. resolve execution context for local and remote scenarios
-4. successfully proxy at least one `codex-threads` workflow across local and remote hosts
-5. reduce at least one current manual workflow into a single stable command
+2. resolve execution context for local and remote scenarios
+3. run useful doctor checks across local and remote scenarios
+4. load a repo-local `anton.yaml` contract and reflect it in `doctor --json`
+5. run at least one stable threads workflow through a thin dependency surface
+6. reduce at least one current manual workflow into a single stable command
+
+## Deferred Work
+
+Explicitly deferred beyond v0:
+
+- `anton entrypoint check`
+- `anton entrypoint sync`
+- a dedicated `anton context resolve` command if `doctor --json` is not enough
+- deeper integrations with external tools beyond the thin `threads` surface

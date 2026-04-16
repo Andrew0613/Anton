@@ -1,17 +1,44 @@
 # Anton
 
-Reusable harness CLI and thin skill layer for agentic repository workflows.
+Reusable harness CLI for agentic repository workflows.
 
 ## Status
 
-This repository is in the research-to-requirements phase.
+`Anton v0.0.1` is the first usable release.
 
-The current goal is to define:
+The current surface is:
 
-- what Anton should own
-- what should remain in repo-local docs and scripts
-- how Anton should integrate with `codex-threads`
-- how a future implementation agent should bootstrap the first working version
+- `doctor`
+- `task-state`
+- `threads`
+- `version`
+
+## Install
+
+Build locally:
+
+```bash
+go build -o ./bin/anton ./cmd/anton
+```
+
+Install into `~/.local/bin`:
+
+```bash
+mkdir -p ~/.local/bin
+go build -o ~/.local/bin/anton ./cmd/anton
+```
+
+After the GitHub tag exists, install from source with:
+
+```bash
+go install github.com/Andrew0613/Anton/cmd/anton@v0.0.1
+```
+
+Check the installed version:
+
+```bash
+anton version
+```
 
 ## Why This Repo Exists
 
@@ -27,49 +54,170 @@ Anton exists to turn those recurring harness problems into a reusable product su
 
 ## Core Positioning
 
-Anton is a new repo.
+Anton owns:
 
-It does not replace `codex-threads`.
+- harness doctor checks
+- canonical task-state lifecycle
+- repo-local harness contracts
+- thin evidence-first threads integration
 
-Current boundary:
+Anton does not own:
 
-- `Anton`
-  - harness CLI
-  - task-state lifecycle
-  - entrypoint generation/checking
-  - execution-context resolution
-  - local/remote preflight
-  - thin skill wrappers
-- `codex-threads`
-  - memory
-  - trace
-  - recent thread lookup
-  - insight generation
-  - evidence-linked receipts
+- orchestration daemons
+- job queues
+- PR/deploy automation
+- `codex-threads` internals
+
+`codex-threads` remains a separate tool with its own scope. Anton integrates
+with it through a thin command surface, but Anton is defined first as an
+independent harness.
+
+## Canonical Repo Contract
+
+Repos should adapt to Anton through a repo-local `anton.yaml`, not by expecting
+Anton to grow repo-specific runtime logic.
+
+Canonical defaults:
+
+- entrypoint: `AGENTS.md`
+- task bundles: `.anton/tasks/active/<id_slug>/`
+- optional thread workspaces: `.anton/workspaces/<project>/...`
+
+Example `anton.yaml`:
+
+```yaml
+version: 1
+entrypoint:
+  path: AGENTS.md
+tasks:
+  root: .anton/tasks
+threads:
+  default_project_strategy: repo-root
+  workspace_roots:
+    - .anton/workspaces
+```
+
+Task identity is inferred from:
+
+- `ANTON_TASK_ID`
+- a `task/.../<id_slug>` branch
+- the current bundle path when already inside `.anton/tasks/...`
 
 ## Initial Scope
 
-Planned v0 modules:
+Released v0 modules:
 
-- `entrypoint`
-- `task-state`
-- `context`
-- `threads`
 - `doctor`
+- `task-state`
+- `threads`
+- `version`
 
-Planned v0 commands:
+Released v0 commands:
 
 - `anton doctor`
-- `anton init`
-- `anton task init`
-- `anton task pulse`
-- `anton task check`
-- `anton context resolve`
-- `anton entrypoint check`
-- `anton entrypoint sync`
+- `anton task-state init`
+- `anton task-state pulse`
+- `anton task-state check`
 - `anton threads doctor`
 - `anton threads recent`
 - `anton threads insights`
+- `anton version`
+
+Planned later surfaces:
+
+- `anton entrypoint check`
+- `anton entrypoint sync`
+- a dedicated `context resolve` surface if `doctor --json` proves too broad
+
+`anton doctor --json` should emit the reusable execution contract for prompts and
+handoffs, so Anton still owns context resolution without starting from a
+separate command.
+
+## Current Shape
+
+The bootstrap implementation already follows the canonical contract:
+
+- `anton doctor` resolves repo context, config source, entrypoint path, and
+  execution risks
+- `anton task-state` creates and checks canonical bundles under `.anton/tasks`
+- `anton threads` stays thin and defers indexing/search semantics to
+  `codex-threads`
+
+## Quick Start
+
+1. Add `anton.yaml` to the repo root.
+2. Run `anton doctor --json`.
+3. Create or validate a canonical task bundle with `anton task-state init --json`
+   or `anton task-state check --json`.
+4. Use `anton threads doctor --json` before relying on thread reads.
+
+Minimal `anton.yaml`:
+
+```yaml
+version: 1
+entrypoint:
+  path: AGENTS.md
+tasks:
+  root: .anton/tasks
+threads:
+  default_project_strategy: repo-root
+  workspace_roots:
+    - .anton/workspaces
+```
+
+## CLI Reference
+
+`anton doctor`
+
+- checks writability, repo context, filesystem risk, configured entrypoint, `codex-threads`, and `anton.yaml`
+- use `--json` for a stable execution/config receipt
+
+`anton task-state init`
+
+- creates `task_plan.md`, `findings.md`, `progress.md`, and `status.yaml`
+- writes the bundle under `.anton/tasks/active/<id_slug>/` by default
+
+`anton task-state check`
+
+- validates required files and the current `status.yaml` schema
+
+`anton task-state pulse`
+
+- refreshes machine metadata and timestamps in `status.yaml`
+
+`anton threads doctor`
+
+- verifies the underlying `codex-threads` binary and returns its JSON doctor output
+
+`anton threads recent`
+
+- returns recent project-scoped threads when scope can be inferred
+
+`anton threads insights`
+
+- returns project-scoped aggregate thread signals
+
+`anton version`
+
+- prints the release version
+- use `--json` for machine-readable output
+
+## Repo-Local Skills
+
+Anton `v0.0.1` includes three thin repo-local skills under `.codex/skills/`:
+
+- `harness-audit`
+- `harness-task`
+- `harness-threads`
+
+They are intentionally thin:
+
+- `harness-audit` starts from `anton doctor --json`
+- `harness-task` manages canonical task bundles through `anton task-state ...`
+- `harness-threads` wraps `anton threads ...` without redefining `codex-threads`
+
+If you want to use them outside this repo, copy or symlink these skill folders
+into your shared Codex skills directory.
 
 ## Docs
 
@@ -77,6 +225,7 @@ Planned v0 commands:
 - Requirements: [docs/plans/2026-04-16-anton-requirements.md](docs/plans/2026-04-16-anton-requirements.md)
 - Implementation plan: [docs/plans/2026-04-16-anton-implementation-plan.md](docs/plans/2026-04-16-anton-implementation-plan.md)
 - Handoff: [docs/handoffs/2026-04-16-anton-handoff.md](docs/handoffs/2026-04-16-anton-handoff.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ## Development Notes
 
@@ -85,6 +234,14 @@ The first implementation pass should stay narrow:
 - no orchestration daemon
 - no PR/deploy automation
 - no queueing/runtime scheduler
-- no attempt to absorb the full `codex-threads` repo
+- no repo-specific runtime adapters
+- no threads-centric product definition beyond a thin dependency surface
 
-The right first milestone is a stable CLI that can unify current harness pain across local repos and remote SSH environments.
+The right first milestone is a stable CLI that provides:
+
+- environment clarity
+- execution-contract clarity
+- durable task state
+- evidence-first thread lookup
+
+across local repos and remote SSH environments.

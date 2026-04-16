@@ -14,18 +14,18 @@ This repo defines the reusable `Anton` harness.
 
 - Keep this repo focused on reusable harness infrastructure.
 - Do not absorb repo-specific business logic from downstream projects.
-- Treat `codex-threads` as a dependency or adapter surface, not as something to overwrite.
-- Prefer a thin repo-local adapter model over hardcoded support for one project.
+- Treat `codex-threads` as a dependency surface, not as something to overwrite.
+- Prefer one canonical Anton contract plus repo-local `anton.yaml` over repo-specific runtime adapters.
 - Keep `AGENTS.md` and `README.md` short; put detailed design in `docs/`.
 
 ## Current Mission
 
-Anton is still in the planning stage.
+Anton is in bootstrap implementation.
 
 The next implementation agent should:
 
-1. bootstrap the CLI skeleton
-2. implement `doctor`, `task-state`, and `threads` as the first three usable surfaces
+1. harden `doctor`, `task-state`, and `threads` around the canonical repo contract
+2. keep repos adapting to Anton via `anton.yaml` and `.anton/tasks/...`
 3. keep the command surface small and stable
 
 ## Doc Map

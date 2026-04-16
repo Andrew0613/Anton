@@ -122,4 +122,4 @@ Anton should own:
 
 Anton is the reusable harness control plane.
 
-`codex-threads` is one of Anton’s most important backend adapters.
+`codex-threads` is one of Anton’s most important external dependencies.

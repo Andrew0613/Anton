@@ -8,5 +8,90 @@
   - new repo
   - CLI-first
   - thin skill layer
-  - `codex-threads` as memory/trace/insight adapter
+  - independent harness rather than a `codex-threads` wrapper
 - Added bootstrap docs for requirements, implementation planning, and handoff.
+- Refined scope decisions after further discussion:
+  - `Anton v0` uses Go
+  - `Anton v0` focuses on `doctor`, `task-state`, and `threads`
+  - execution-contract output is folded into `doctor --json` for the first implementation wave
+  - `entrypoint sync/check` moves to a later phase
+  - external integrations, including `codex-threads`, are deferred and optional
+- Aligned repo docs around the same `doctor` / `task-state` / `threads` v0 surface.
+- Bootstrapped the Go CLI skeleton:
+  - `cmd/anton`
+  - `internal/app`
+  - `internal/doctor`
+- Implemented the first usable `anton doctor` surface with:
+  - local vs remote-SSH detection
+  - repo/worktree/plain-directory detection
+  - writable working directory check
+  - filesystem risk check
+  - `AGENTS.md` entrypoint check
+  - `codex-threads` availability check
+  - human-readable and JSON output modes
+- Implemented minimal `task-state` commands:
+  - `init` creates the default task bundle and `status.yaml`
+  - `pulse` refreshes machine metadata and timestamps
+  - `check` validates required files plus basic `status.yaml` schema
+- Implemented minimal `threads` commands:
+  - `doctor` wraps `codex-threads doctor`
+  - `recent` wraps `codex-threads threads recent`
+  - `insights` wraps `codex-threads insights`
+  - binary discovery supports both PATH and `~/.local/bin` fallback
+- Installed Go via Homebrew:
+  - `go version go1.26.2 darwin/arm64`
+- Added baseline unit tests for:
+  - `internal/doctor`
+  - `internal/taskstate`
+  - `internal/threads`
+- Ran validation successfully:
+  - `gofmt -w cmd internal`
+  - `go build ./...`
+  - `go test ./...`
+  - smoke-tested `anton doctor`, `anton threads doctor`, and `anton task-state init/check`
+- Added a small adapter layer in `internal/adapter`:
+  - shared execution-context resolution
+  - canonical task bundle definition
+  - config-driven threads project inference
+  - repo-local entrypoint path resolution
+- Routed `doctor`, `task-state`, and `threads` through the shared context/config layer instead of keeping repo-context logic duplicated in each command.
+- Added fixture-based tests for:
+  - repo root
+  - git subdir
+  - git worktree
+  - plain-directory context
+  - complete and incomplete task bundles
+- Re-ran validation successfully after the adapter refactor:
+  - `gofmt -w internal/adapter internal/doctor internal/taskstate internal/threads`
+  - `go build ./...`
+  - `go test ./...`
+  - smoke-tested `anton doctor`, `anton threads recent`, and `anton task-state init`
+- Added repo-local `anton.yaml` loading with canonical defaults:
+  - `entrypoint.path`
+  - `tasks.root`
+  - `threads.default_project_strategy`
+  - `threads.workspace_roots`
+- Pivoted away from repo-specific runtime adapters after validating the direction with real repos.
+  - repos should adapt to Anton through config
+  - Anton should not carry downstream task-layout branches in its main runtime
+- Locked scope further:
+  - downstream repos are responsible for adopting the Anton contract
+  - legacy layout migration is not part of Anton v0 implementation work
+- Standardized the runtime around one canonical contract:
+  - task bundles live under `.anton/tasks/active/<id_slug>/`
+  - task identity comes from `ANTON_TASK_ID`, `task/.../<id_slug>` branches, or the current bundle path
+  - threads scope resolves from flag, env, configured workspace roots, or repo root
+- Updated `anton doctor` to surface the resolved Anton config contract and warn when a repo has no explicit `anton.yaml`.
+- Removed the stale `euresis` runtime shim from the main code path.
+- Updated README, requirements, implementation plan, handoff, findings, and task plan to match the canonical config-driven direction.
+- Re-ran validation successfully after the canonical-contract cleanup:
+  - `gofmt -w cmd internal`
+  - `go test ./...`
+  - `go build -o /tmp/anton ./cmd/anton`
+  - smoke-tested `anton doctor --json` in this repo and confirmed repo-local `anton.yaml` is reported
+  - smoke-tested `anton doctor --json` in a fixture repo without `anton.yaml` and confirmed the expected degraded config check
+  - smoke-tested `anton threads recent --json --limit 1` in the configured workspace-root fixture
+- Prepared `v0.0.1` release surface:
+  - added `anton version` and top-level `--version`
+  - added repo-local thin skills under `.codex/skills/`
+  - added install/quickstart/release notes in `README.md` and `CHANGELOG.md`

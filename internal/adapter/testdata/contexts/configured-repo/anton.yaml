@@ -1,0 +1,9 @@
+version: 1
+entrypoint:
+  path: ops/AGENTS.md
+tasks:
+  root: .anton/tasks
+threads:
+  default_project_strategy: none
+  workspace_roots:
+    - .anton/workspaces
