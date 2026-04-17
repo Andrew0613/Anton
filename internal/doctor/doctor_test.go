@@ -55,19 +55,21 @@ func TestCheckAntonConfigReportsMissingFile(t *testing.T) {
 
 func TestDoctorJSONReportsBuiltInDefaultsWhenAntonYAMLMissing(t *testing.T) {
 	repoRoot := makeDoctorTempRepoRoot(t)
-	writeDoctorFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+	writeDoctorFile(t, filepath.Join(repoRoot, "AGENTS.md"), "See README.md for details.\n")
+	writeDoctorFile(t, filepath.Join(repoRoot, "README.md"), "Anton contract uses AGENTS.md and anton.yaml.\n")
 	binDir := filepath.Join(repoRoot, "bin")
 	codexThreads := filepath.Join(binDir, "codex-threads")
 	writeDoctorFile(t, codexThreads, "#!/bin/sh\nexit 0\n")
 	if err := os.Chmod(codexThreads, 0o755); err != nil {
 		t.Fatalf("chmod codex-threads: %v", err)
 	}
-	t.Setenv("PATH", binDir)
+	pathValue := binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	t.Setenv("PATH", pathValue)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := withWorkingDirectory(t, repoRoot, func() int {
-		return Run([]string{"--json"}, &stdout, &stderr, []string{"PATH=" + binDir, "HOME=" + repoRoot})
+		return Run([]string{"--json"}, &stdout, &stderr, []string{"PATH=" + pathValue, "HOME=" + repoRoot})
 	})
 	if exitCode != 1 {
 		t.Fatalf("exit code = %d, want 1 (degraded checks expected)", exitCode)
@@ -77,6 +79,93 @@ func TestDoctorJSONReportsBuiltInDefaultsWhenAntonYAMLMissing(t *testing.T) {
 	assertDoctorGoldenJSON(t, stdout.Bytes(), "doctor_degraded.json", replacements)
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestDoctorExplainIncludesRemediation(t *testing.T) {
+	repoRoot := makeDoctorTempRepoRoot(t)
+	writeDoctorFile(t, filepath.Join(repoRoot, "AGENTS.md"), "See README.md for details.\n")
+	writeDoctorFile(t, filepath.Join(repoRoot, "README.md"), "Anton contract uses AGENTS.md and anton.yaml.\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"--explain"}, &stdout, &stderr, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + repoRoot})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "Remediation") {
+		t.Fatalf("stdout missing Remediation section:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestDoctorJSONContextReceiptAcrossWorkspaceKinds(t *testing.T) {
+	cases := []struct {
+		name              string
+		path              string
+		wantWorkspaceKind string
+	}{
+		{
+			name:              "repo-root",
+			path:              doctorFixturePath("repo-root"),
+			wantWorkspaceKind: "git-repo-root",
+		},
+		{
+			name:              "git-subdir",
+			path:              filepath.Join(doctorFixturePath("repo-root"), "subdir"),
+			wantWorkspaceKind: "git-subdir",
+		},
+		{
+			name:              "git-worktree",
+			path:              doctorFixturePath("worktree"),
+			wantWorkspaceKind: "git-worktree",
+		},
+		{
+			name:              "plain-directory",
+			path:              "",
+			wantWorkspaceKind: "plain-directory",
+		},
+	}
+
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.path == "" {
+				testCase.path = t.TempDir()
+				writeDoctorFile(t, filepath.Join(testCase.path, "notes.txt"), "plain workspace")
+			}
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := withWorkingDirectory(t, testCase.path, func() int {
+				return Run([]string{"--json"}, &stdout, &stderr, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")})
+			})
+			if exitCode != 1 && exitCode != 0 {
+				t.Fatalf("unexpected exit code %d", exitCode)
+			}
+
+			var payload struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Context struct {
+						WorkspaceKind string `json:"workspace_kind"`
+					} `json:"context"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+				t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+			}
+			if payload.Data.Context.WorkspaceKind != testCase.wantWorkspaceKind {
+				t.Fatalf("workspace_kind = %q, want %q", payload.Data.Context.WorkspaceKind, testCase.wantWorkspaceKind)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+		})
 	}
 }
 
@@ -171,13 +260,25 @@ func normalizeDoctorJSON(t *testing.T, payload []byte, replacements map[string]s
 		parsed.Data.Summary.OKCount = -1
 		parsed.Data.Summary.DegradedCount = -1
 		for index := range parsed.Data.Checks {
-			if parsed.Data.Checks[index].Name != "filesystem-type" {
-				continue
+			switch parsed.Data.Checks[index].Name {
+			case "filesystem-type":
+				parsed.Data.Checks[index].Status = "<FILESYSTEM_STATUS>"
+				parsed.Data.Checks[index].Detail = "<FILESYSTEM_DETAIL>"
+				if strings.TrimSpace(parsed.Data.Checks[index].Hint) != "" {
+					parsed.Data.Checks[index].Hint = "<FILESYSTEM_HINT>"
+				}
+			case "go-toolchain":
+				parsed.Data.Checks[index].Status = "<GO_TOOLCHAIN_STATUS>"
+				parsed.Data.Checks[index].Detail = "<GO_TOOLCHAIN_DETAIL>"
+				if strings.TrimSpace(parsed.Data.Checks[index].Hint) != "" {
+					parsed.Data.Checks[index].Hint = "<GO_TOOLCHAIN_HINT>"
+				}
 			}
-			parsed.Data.Checks[index].Status = "<FILESYSTEM_STATUS>"
-			parsed.Data.Checks[index].Detail = "<FILESYSTEM_DETAIL>"
-			if strings.TrimSpace(parsed.Data.Checks[index].Hint) != "" {
-				parsed.Data.Checks[index].Hint = "<FILESYSTEM_HINT>"
+		}
+		for index := range parsed.Data.Remediation {
+			if parsed.Data.Remediation[index].Check == "go-toolchain" {
+				parsed.Data.Remediation[index].Severity = "<GO_TOOLCHAIN_STATUS>"
+				parsed.Data.Remediation[index].Actions = []string{"<GO_TOOLCHAIN_ACTION>"}
 			}
 		}
 	}
@@ -197,6 +298,10 @@ func resolveDoctorGoldenPath(t *testing.T, name string) string {
 		t.Fatalf("resolve caller path for golden file %s", name)
 	}
 	return filepath.Join(filepath.Dir(thisFile), "testdata", "golden", name)
+}
+
+func doctorFixturePath(name string) string {
+	return filepath.Join("..", "adapter", "testdata", "contexts", name)
 }
 
 func withWorkingDirectory(t *testing.T, path string, fn func() int) int {

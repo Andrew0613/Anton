@@ -18,6 +18,7 @@ type options struct {
 	JSON    bool
 	Limit   int
 	Project string
+	Topic   string
 }
 
 type adapterInfo struct {
@@ -35,7 +36,9 @@ type adapterInfo struct {
 
 type responseData struct {
 	Adapter adapterInfo `json:"adapter"`
-	Raw     any         `json:"raw"`
+	Raw     any         `json:"raw,omitempty"`
+	Brief   any         `json:"brief,omitempty"`
+	Recipe  any         `json:"recipe,omitempty"`
 }
 
 type errorPayload struct {
@@ -62,6 +65,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return runRecent(args[1:], stdout, stderr, environ)
 	case "insights":
 		return runInsights(args[1:], stdout, stderr, environ)
+	case "brief":
+		return runBrief(args[1:], stdout, stderr, environ)
+	case "recipe":
+		return runRecipe(args[1:], stdout, stderr, environ)
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usageText())
 		return 0
@@ -72,7 +79,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 }
 
 func runDoctor(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
-	opts, err := parseOptions(args, false, 0)
+	opts, err := parseOptions(args, false, 0, false)
 	if err != nil {
 		return writeError("threads doctor", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
@@ -113,7 +120,7 @@ func runDoctor(args []string, stdout io.Writer, stderr io.Writer, environ []stri
 }
 
 func runRecent(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
-	opts, err := parseOptions(args, true, 20)
+	opts, err := parseOptions(args, true, 20, false)
 	if err != nil {
 		return writeError("threads recent", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
@@ -170,7 +177,7 @@ func runRecent(args []string, stdout io.Writer, stderr io.Writer, environ []stri
 }
 
 func runInsights(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
-	opts, err := parseOptions(args, true, 50)
+	opts, err := parseOptions(args, true, 50, false)
 	if err != nil {
 		return writeError("threads insights", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
@@ -225,7 +232,144 @@ func runInsights(args []string, stdout io.Writer, stderr io.Writer, environ []st
 	return writeResponse("threads insights", data, opts.JSON, stdout, 0)
 }
 
-func parseOptions(args []string, allowLimit bool, defaultLimit int) (options, error) {
+func runBrief(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	opts, err := parseOptions(args, true, 20, true)
+	if err != nil {
+		return writeError("threads brief", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return writeError("threads brief", "threads-brief-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	resolved, err := adapter.Resolve(wd, environ)
+	if err != nil {
+		return writeError("threads brief", "threads-brief-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	binaryPath, discovery, err := locateCodexThreads(environ)
+	if err != nil {
+		return writeError("threads brief", "threads-brief-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	projectSpec := resolved.Definition.ResolveThreadsProject(resolved.Context, environ, opts.Project)
+	project := projectSpec.Name
+	source := projectSpec.Source
+	commandArgs := []string{
+		"threads", "recent",
+		"--json",
+		"--limit", strconv.Itoa(opts.Limit),
+		"--cwd", wd,
+	}
+	if project != "" {
+		commandArgs = append(commandArgs, "--project", project)
+	}
+
+	raw, err := executeJSON(binaryPath, environ, wd, commandArgs...)
+	if err != nil {
+		return writeError("threads brief", "threads-brief-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	brief := map[string]any{
+		"project":            project,
+		"project_source":     source,
+		"topic":              opts.Topic,
+		"scope_warning":      scopeWarning(project),
+		"recommended_action": "use this brief to resume only the scoped context needed for the current task",
+		"upstream_command":   "codex-threads threads recent --json",
+		"raw":                raw,
+	}
+
+	data := responseData{
+		Adapter: adapterInfo{
+			Adapter:          resolved.Definition.Name(),
+			BinaryPath:       binaryPath,
+			Discovery:        discovery,
+			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			ThreadsStrategy:  resolved.Config.Threads.DefaultProjectStrategy,
+			Project:          project,
+			ProjectSource:    source,
+			ScopeWarning:     scopeWarning(project),
+		},
+		Brief: brief,
+	}
+	return writeResponse("threads brief", data, opts.JSON, stdout, 0)
+}
+
+func runRecipe(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	opts, err := parseOptions(args, true, 50, false)
+	if err != nil {
+		return writeError("threads recipe", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return writeError("threads recipe", "threads-recipe-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	resolved, err := adapter.Resolve(wd, environ)
+	if err != nil {
+		return writeError("threads recipe", "threads-recipe-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	binaryPath, discovery, err := locateCodexThreads(environ)
+	if err != nil {
+		return writeError("threads recipe", "threads-recipe-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	projectSpec := resolved.Definition.ResolveThreadsProject(resolved.Context, environ, opts.Project)
+	project := projectSpec.Name
+	source := projectSpec.Source
+	commandArgs := []string{
+		"insights",
+		"--json",
+		"--limit", strconv.Itoa(opts.Limit),
+	}
+	if project != "" {
+		commandArgs = append(commandArgs, "--project", project)
+	}
+
+	raw, err := executeJSON(binaryPath, environ, wd, commandArgs...)
+	if err != nil {
+		return writeError("threads recipe", "threads-recipe-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+
+	recipe := map[string]any{
+		"project":          project,
+		"project_source":   source,
+		"scope_warning":    scopeWarning(project),
+		"upstream_command": "codex-threads insights --json",
+		"checklist": []string{
+			"run anton doctor --json before starting",
+			"run anton task-state check --json to verify closure gates",
+			"query codex-threads for only the current project scope",
+			"record validations before moving lifecycle to done",
+		},
+		"raw": raw,
+	}
+
+	data := responseData{
+		Adapter: adapterInfo{
+			Adapter:          resolved.Definition.Name(),
+			BinaryPath:       binaryPath,
+			Discovery:        discovery,
+			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			ThreadsStrategy:  resolved.Config.Threads.DefaultProjectStrategy,
+			Project:          project,
+			ProjectSource:    source,
+			ScopeWarning:     scopeWarning(project),
+		},
+		Recipe: recipe,
+	}
+	return writeResponse("threads recipe", data, opts.JSON, stdout, 0)
+}
+
+func parseOptions(args []string, allowLimit bool, defaultLimit int, allowTopic bool) (options, error) {
 	opts := options{Limit: defaultLimit}
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -250,6 +394,15 @@ func parseOptions(args []string, allowLimit bool, defaultLimit int) (options, er
 				return opts, fmt.Errorf("invalid --limit value %q", args[index])
 			}
 			opts.Limit = value
+		case "--topic":
+			if !allowTopic {
+				return opts, fmt.Errorf("--topic is not supported for this command")
+			}
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --topic")
+			}
+			opts.Topic = strings.TrimSpace(args[index])
 		default:
 			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}
@@ -347,6 +500,8 @@ func usageText() string {
   anton threads doctor [--json]
   anton threads recent [--json] [--limit N] [--project NAME]
   anton threads insights [--json] [--limit N] [--project NAME]
+  anton threads brief [--json] [--limit N] [--project NAME] [--topic TOPIC]
+  anton threads recipe [--json] [--limit N] [--project NAME]
 `
 }
 
@@ -377,9 +532,20 @@ func writeResponse(command string, data responseData, asJSON bool, stdout io.Wri
 		_, _ = fmt.Fprintf(stdout, "Warning: %s\n", data.Adapter.ScopeWarning)
 	}
 
-	encoded, _ := json.MarshalIndent(data.Raw, "", "  ")
-	_, _ = fmt.Fprintf(stdout, "\nRaw Payload\n%s\n", string(encoded))
+	label, display := displayPayload(data)
+	encoded, _ := json.MarshalIndent(display, "", "  ")
+	_, _ = fmt.Fprintf(stdout, "\n%s\n%s\n", label, string(encoded))
 	return exitCode
+}
+
+func displayPayload(data responseData) (string, any) {
+	if data.Brief != nil {
+		return "Brief Payload", data.Brief
+	}
+	if data.Recipe != nil {
+		return "Recipe Payload", data.Recipe
+	}
+	return "Raw Payload", data.Raw
 }
 
 func writeError(command string, code string, message string, asJSON bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

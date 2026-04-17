@@ -1,13 +1,16 @@
 package doctor
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
@@ -19,11 +22,26 @@ const (
 	statusBlocked  = "blocked"
 )
 
+var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(([^)]+)\)`)
+
 type check struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Detail string `json:"detail"`
 	Hint   string `json:"hint,omitempty"`
+}
+
+type remediation struct {
+	Check    string   `json:"check"`
+	Severity string   `json:"severity"`
+	Actions  []string `json:"actions"`
+}
+
+type contractFinding struct {
+	Level   string `json:"level"`
+	Code    string `json:"code"`
+	File    string `json:"file,omitempty"`
+	Message string `json:"message"`
 }
 
 type environment struct {
@@ -60,13 +78,16 @@ type summary struct {
 }
 
 type reportData struct {
-	Adapter        string          `json:"adapter"`
-	Environment    environment     `json:"environment"`
-	Context        contextContract `json:"context"`
-	Config         configContract  `json:"config"`
-	PromptContract string          `json:"prompt_contract"`
-	Checks         []check         `json:"checks"`
-	Summary        summary         `json:"summary"`
+	Adapter        string               `json:"adapter"`
+	Environment    environment          `json:"environment"`
+	Context        contextContract      `json:"context"`
+	Config         configContract       `json:"config"`
+	TaskIdentity   adapter.TaskIdentity `json:"task_identity"`
+	PromptContract string               `json:"prompt_contract"`
+	Checks         []check              `json:"checks"`
+	Remediation    []remediation        `json:"remediation,omitempty"`
+	ContractAudit  []contractFinding    `json:"contract_audit,omitempty"`
+	Summary        summary              `json:"summary"`
 }
 
 type errorPayload struct {
@@ -82,7 +103,8 @@ type report struct {
 }
 
 type options struct {
-	JSON bool
+	JSON    bool
+	Explain bool
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
@@ -107,7 +129,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		encoder.SetIndent("", "  ")
 		_ = encoder.Encode(output)
 	} else {
-		renderHuman(stdout, output)
+		renderHuman(stdout, output, opts.Explain)
 	}
 
 	if output.OK && data.Summary.DegradedCount == 0 {
@@ -123,6 +145,8 @@ func parseOptions(args []string) (options, error) {
 		switch arg {
 		case "--json":
 			opts.JSON = true
+		case "--explain":
+			opts.Explain = true
 		default:
 			return opts, fmt.Errorf("unexpected argument: %s", arg)
 		}
@@ -131,7 +155,7 @@ func parseOptions(args []string) (options, error) {
 }
 
 func collect(environ []string) (reportData, error) {
-	envMap := envMap(environ)
+	envValues := envMap(environ)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -145,6 +169,9 @@ func collect(environ []string) (reportData, error) {
 
 	filesystemType := detectFilesystemType(wd)
 	contextData := resolved.Context
+	entrypointPath := resolved.Definition.EntrypointPath(contextData)
+	taskIdentity := adapter.ResolveTaskIdentity(contextData, resolved.Config, environ)
+	contractAudit := auditContract(contextData, entrypointPath)
 
 	context := contextContract{
 		WorkingDirectory: contextData.WorkingDirectory,
@@ -160,8 +187,11 @@ func collect(environ []string) (reportData, error) {
 		checkWorkingDirectoryWritable(contextData.WorkingDirectory),
 		checkRepositoryContext(contextData),
 		checkFilesystem(filesystemType),
-		checkEntrypointFile(resolved.Definition.EntrypointPath(contextData)),
-		checkCodexThreads(envMap),
+		checkEntrypointFile(entrypointPath),
+		checkCodexThreads(envValues),
+		checkGoToolchain(),
+		checkTaskIdentity(taskIdentity),
+		checkContractAudit(contractAudit),
 	}
 
 	data := reportData{
@@ -176,14 +206,17 @@ func collect(environ []string) (reportData, error) {
 		Config: configContract{
 			Path:                          resolved.Config.Path,
 			Source:                        resolved.Config.Source(),
-			EntrypointPath:                resolved.Definition.EntrypointPath(contextData),
+			EntrypointPath:                entrypointPath,
 			TasksRoot:                     resolved.Config.Tasks.Root,
 			ThreadsDefaultProjectStrategy: resolved.Config.Threads.DefaultProjectStrategy,
 			ThreadsWorkspaceRoots:         resolved.Config.Threads.WorkspaceRoots,
 		},
 		Context:        context,
-		PromptContract: renderPromptContract(contextData.ExecutionTarget, context),
+		TaskIdentity:   taskIdentity,
+		PromptContract: renderPromptContract(contextData.ExecutionTarget, context, taskIdentity),
 		Checks:         checks,
+		Remediation:    buildRemediation(checks, contractAudit),
+		ContractAudit:  contractAudit,
 		Summary:        summarizeChecks(checks),
 	}
 
@@ -324,7 +357,7 @@ func checkEntrypointFile(path string) check {
 	}
 }
 
-func checkCodexThreads(envMap map[string]string) check {
+func checkCodexThreads(envValues map[string]string) check {
 	if path, err := exec.LookPath("codex-threads"); err == nil {
 		return check{
 			Name:   "codex-threads",
@@ -333,7 +366,7 @@ func checkCodexThreads(envMap map[string]string) check {
 		}
 	}
 
-	home := envMap["HOME"]
+	home := envValues["HOME"]
 	if home != "" {
 		fallback := filepath.Join(home, ".local", "bin", "codex-threads")
 		if _, err := os.Stat(fallback); err == nil {
@@ -351,6 +384,93 @@ func checkCodexThreads(envMap map[string]string) check {
 		Status: statusDegraded,
 		Detail: "codex-threads is not available on PATH",
 		Hint:   "install codex-threads before using anton threads, or skip threads workflows on this host",
+	}
+}
+
+func checkGoToolchain() check {
+	path, err := exec.LookPath("go")
+	if err != nil {
+		return check{
+			Name:   "go-toolchain",
+			Status: statusDegraded,
+			Detail: "go toolchain is not available on PATH",
+			Hint:   "install Go or add the go binary directory to PATH if this host should run Anton tests/builds",
+		}
+	}
+
+	out, err := exec.Command(path, "version").Output()
+	if err != nil {
+		return check{
+			Name:   "go-toolchain",
+			Status: statusDegraded,
+			Detail: fmt.Sprintf("go exists at %s but version probe failed: %v", path, err),
+			Hint:   "verify that the go binary is executable and not blocked by shell/profile drift",
+		}
+	}
+
+	return check{
+		Name:   "go-toolchain",
+		Status: statusOK,
+		Detail: strings.TrimSpace(string(out)),
+	}
+}
+
+func checkTaskIdentity(identity adapter.TaskIdentity) check {
+	if identity.Conflict {
+		return check{
+			Name:   "task-identity",
+			Status: statusBlocked,
+			Detail: fmt.Sprintf("conflicting task identity signals detected: %s", strings.Join(identity.ConflictValues, ", ")),
+			Hint:   "align ANTON_TASK_ID, task/<id_slug> branch, and current task bundle before continuing",
+		}
+	}
+	if strings.TrimSpace(identity.Resolved) == "" {
+		return check{
+			Name:   "task-identity",
+			Status: statusDegraded,
+			Detail: "task identity could not be inferred from env, branch, or bundle path",
+			Hint:   "set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing bundle",
+		}
+	}
+
+	sources := make([]string, 0, len(identity.Signals))
+	for _, signal := range identity.Signals {
+		if !slices.Contains(sources, signal.Source) {
+			sources = append(sources, signal.Source)
+		}
+	}
+
+	return check{
+		Name:   "task-identity",
+		Status: statusOK,
+		Detail: fmt.Sprintf("inferred task id %s from %s", identity.Resolved, strings.Join(sources, ", ")),
+	}
+}
+
+func checkContractAudit(findings []contractFinding) check {
+	if len(findings) == 0 {
+		return check{
+			Name:   "contract-audit",
+			Status: statusOK,
+			Detail: "no contract drift findings across anton.yaml and entrypoint docs",
+		}
+	}
+
+	highest := statusDegraded
+	for _, finding := range findings {
+		if finding.Level == "error" {
+			highest = statusBlocked
+			break
+		}
+	}
+
+	detail := fmt.Sprintf("%d drift finding(s) detected", len(findings))
+	hint := "run anton doctor --explain for actionable remediation"
+	return check{
+		Name:   "contract-audit",
+		Status: highest,
+		Detail: detail,
+		Hint:   hint,
 	}
 }
 
@@ -373,7 +493,38 @@ func summarizeChecks(checks []check) summary {
 	return result
 }
 
-func renderPromptContract(executionTarget string, context contextContract) string {
+func buildRemediation(checks []check, findings []contractFinding) []remediation {
+	actions := make([]remediation, 0, len(checks))
+	for _, item := range checks {
+		if item.Status == statusOK {
+			continue
+		}
+
+		steps := make([]string, 0, 2)
+		if strings.TrimSpace(item.Hint) != "" {
+			steps = append(steps, item.Hint)
+		} else {
+			steps = append(steps, "inspect this check detail and resolve the reported mismatch")
+		}
+		if item.Name == "contract-audit" {
+			for _, finding := range findings {
+				steps = append(steps, fmt.Sprintf("[%s] %s", finding.Code, finding.Message))
+				if len(steps) >= 4 {
+					break
+				}
+			}
+		}
+
+		actions = append(actions, remediation{
+			Check:    item.Name,
+			Severity: item.Status,
+			Actions:  steps,
+		})
+	}
+	return actions
+}
+
+func renderPromptContract(executionTarget string, context contextContract, identity adapter.TaskIdentity) string {
 	lines := []string{
 		fmt.Sprintf("Execution target: %s", executionTarget),
 		fmt.Sprintf("Working directory: %s", context.WorkingDirectory),
@@ -392,11 +543,18 @@ func renderPromptContract(executionTarget string, context contextContract) strin
 	if len(context.ScopePaths) > 0 {
 		lines = append(lines, fmt.Sprintf("Scope paths: %s", strings.Join(context.ScopePaths, ", ")))
 	}
+	if identity.Conflict {
+		lines = append(lines, fmt.Sprintf("Task identity conflict: %s", strings.Join(identity.ConflictValues, ", ")))
+	} else if strings.TrimSpace(identity.Resolved) != "" {
+		lines = append(lines, fmt.Sprintf("Inferred task id: %s", identity.Resolved))
+	} else {
+		lines = append(lines, "Inferred task id: unresolved")
+	}
 
 	return strings.Join(lines, "\n")
 }
 
-func renderHuman(stdout io.Writer, output report) {
+func renderHuman(stdout io.Writer, output report, explain bool) {
 	if output.Data == nil {
 		return
 	}
@@ -421,6 +579,11 @@ func renderHuman(stdout io.Writer, output report) {
 	if data.Context.GitBranch != "" {
 		_, _ = fmt.Fprintf(stdout, "  Branch: %s\n", data.Context.GitBranch)
 	}
+	if data.TaskIdentity.Conflict {
+		_, _ = fmt.Fprintf(stdout, "  Task identity: conflict (%s)\n", strings.Join(data.TaskIdentity.ConflictValues, ", "))
+	} else if strings.TrimSpace(data.TaskIdentity.Resolved) != "" {
+		_, _ = fmt.Fprintf(stdout, "  Task identity: %s\n", data.TaskIdentity.Resolved)
+	}
 
 	_, _ = fmt.Fprintf(stdout, "\nConfig\n")
 	_, _ = fmt.Fprintf(stdout, "  Source: %s\n", data.Config.Source)
@@ -440,7 +603,147 @@ func renderHuman(stdout io.Writer, output report) {
 		}
 	}
 
+	if explain && len(data.Remediation) > 0 {
+		_, _ = fmt.Fprintf(stdout, "\nRemediation\n")
+		for _, item := range data.Remediation {
+			_, _ = fmt.Fprintf(stdout, "  [%s] %s\n", strings.ToUpper(item.Severity), item.Check)
+			for _, action := range item.Actions {
+				_, _ = fmt.Fprintf(stdout, "    - %s\n", action)
+			}
+		}
+	}
+
+	if len(data.ContractAudit) > 0 {
+		_, _ = fmt.Fprintf(stdout, "\nContract Audit\n")
+		for _, finding := range data.ContractAudit {
+			location := finding.File
+			if location == "" {
+				location = "-"
+			}
+			_, _ = fmt.Fprintf(stdout, "  %-5s %-24s %-20s %s\n", strings.ToUpper(finding.Level), finding.Code, location, finding.Message)
+		}
+	}
+
 	_, _ = fmt.Fprintf(stdout, "\nPrompt Contract\n%s\n", data.PromptContract)
+}
+
+func auditContract(context adapter.Context, entrypointPath string) []contractFinding {
+	findings := []contractFinding{}
+	if strings.TrimSpace(context.RepositoryRoot) == "" {
+		findings = append(findings, contractFinding{
+			Level:   "warning",
+			Code:    "plain-directory",
+			Message: "doctor is running outside a repository root, so doc contract checks are partial",
+		})
+		return findings
+	}
+
+	repoRoot := context.RepositoryRoot
+	agentsPath := filepath.Join(repoRoot, "AGENTS.md")
+	readmePath := filepath.Join(repoRoot, "README.md")
+	required := []string{agentsPath, readmePath, entrypointPath}
+	for _, path := range required {
+		if _, err := os.Stat(path); err != nil {
+			findings = append(findings, contractFinding{
+				Level:   "error",
+				Code:    "missing-reference",
+				File:    path,
+				Message: "required contract file is missing",
+			})
+		}
+	}
+
+	if agentsContent, err := os.ReadFile(agentsPath); err == nil {
+		if !strings.Contains(string(agentsContent), "README.md") {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "agents-missing-readme-link",
+				File:    agentsPath,
+				Message: "AGENTS.md does not reference README.md",
+			})
+		}
+		if lineCount(string(agentsContent)) > 400 {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "entrypoint-oversized",
+				File:    agentsPath,
+				Message: "AGENTS.md is large; keep the entrypoint short and route to docs/",
+			})
+		}
+		findings = append(findings, missingRelativeLinks(agentsPath, repoRoot)...)
+	}
+
+	if readmeContent, err := os.ReadFile(readmePath); err == nil {
+		entrypointBase := filepath.Base(entrypointPath)
+		if !strings.Contains(string(readmeContent), entrypointBase) {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "readme-missing-entrypoint",
+				File:    readmePath,
+				Message: fmt.Sprintf("README.md does not mention configured entrypoint %s", entrypointBase),
+			})
+		}
+		if !strings.Contains(string(readmeContent), "anton.yaml") {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "readme-missing-config-contract",
+				File:    readmePath,
+				Message: "README.md does not mention anton.yaml contract expectations",
+			})
+		}
+		findings = append(findings, missingRelativeLinks(readmePath, repoRoot)...)
+	}
+
+	return findings
+}
+
+func missingRelativeLinks(filePath string, repoRoot string) []contractFinding {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+
+	findings := []contractFinding{}
+	matches := markdownLinkPattern.FindAllStringSubmatch(string(content), -1)
+	for _, match := range matches {
+		if len(match) != 2 {
+			continue
+		}
+		link := strings.TrimSpace(match[1])
+		if link == "" || strings.HasPrefix(link, "#") || strings.Contains(link, "://") || strings.HasPrefix(link, "mailto:") {
+			continue
+		}
+
+		target := filepath.Clean(filepath.Join(filepath.Dir(filePath), link))
+		if !strings.HasPrefix(target, repoRoot) {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "link-escapes-repo",
+				File:    filePath,
+				Message: fmt.Sprintf("relative link escapes repository: %s", link),
+			})
+			continue
+		}
+
+		if _, err := os.Stat(target); err != nil {
+			findings = append(findings, contractFinding{
+				Level:   "warning",
+				Code:    "stale-link",
+				File:    filePath,
+				Message: fmt.Sprintf("relative link target is missing: %s", link),
+			})
+		}
+	}
+	return findings
+}
+
+func lineCount(content string) int {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+	return count
 }
 
 func writeError(command string, code string, message string, asJSON bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

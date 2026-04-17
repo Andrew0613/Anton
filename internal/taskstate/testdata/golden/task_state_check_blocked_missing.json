@@ -11,6 +11,8 @@
     },
     "bundle_root": "<REPO_ROOT>/.anton/state/active/demo_task",
     "status_path": "<REPO_ROOT>/.anton/state/active/demo_task/status.yaml",
+    "lifecycle": {},
+    "evidence": {},
     "files": [
       {
         "path": "<REPO_ROOT>/.anton/state/active/demo_task/task_plan.md",

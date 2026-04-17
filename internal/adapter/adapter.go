@@ -46,7 +46,15 @@ type ThreadsProject struct {
 }
 
 type StatusSnapshot struct {
-	TaskID string
+	TaskID                   string
+	Lifecycle                string
+	UpdatedAt                string
+	FinishState              string
+	NextStep                 string
+	BlockerCount             int
+	ExpectedDeliverableCount int
+	AttemptCount             int
+	ValidationCount          int
 }
 
 type Definition interface {

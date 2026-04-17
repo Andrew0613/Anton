@@ -27,7 +27,10 @@
       "tasks_root": ".anton/tasks",
       "threads_default_project_strategy": "repo-root"
     },
-    "prompt_contract": "Execution target: local\nWorking directory: <REPO_ROOT>\nWorkspace kind: git-repo-root\nRepository root: <REPO_ROOT>\nRepository kind: git-repo-root\nGit branch: main\nScope paths: <REPO_ROOT>",
+    "task_identity": {
+      "conflict": false
+    },
+    "prompt_contract": "Execution target: local\nWorking directory: <REPO_ROOT>\nWorkspace kind: git-repo-root\nRepository root: <REPO_ROOT>\nRepository kind: git-repo-root\nGit branch: main\nScope paths: <REPO_ROOT>\nInferred task id: unresolved",
     "checks": [
       {
         "name": "anton-config",
@@ -48,8 +51,7 @@
       {
         "name": "filesystem-type",
         "status": "<FILESYSTEM_STATUS>",
-        "detail": "<FILESYSTEM_DETAIL>",
-        "hint": "<FILESYSTEM_HINT>"
+        "detail": "<FILESYSTEM_DETAIL>"
       },
       {
         "name": "entrypoint-file",
@@ -60,6 +62,38 @@
         "name": "codex-threads",
         "status": "ok",
         "detail": "found codex-threads on PATH at <REPO_ROOT>/bin/codex-threads"
+      },
+      {
+        "name": "go-toolchain",
+        "status": "<GO_TOOLCHAIN_STATUS>",
+        "detail": "<GO_TOOLCHAIN_DETAIL>"
+      },
+      {
+        "name": "task-identity",
+        "status": "degraded",
+        "detail": "task identity could not be inferred from env, branch, or bundle path",
+        "hint": "set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing bundle"
+      },
+      {
+        "name": "contract-audit",
+        "status": "ok",
+        "detail": "no contract drift findings across anton.yaml and entrypoint docs"
+      }
+    ],
+    "remediation": [
+      {
+        "check": "anton-config",
+        "severity": "degraded",
+        "actions": [
+          "add a repo-local anton.yaml so the repo declares its Anton contract explicitly"
+        ]
+      },
+      {
+        "check": "task-identity",
+        "severity": "degraded",
+        "actions": [
+          "set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing bundle"
+        ]
       }
     ],
     "summary": {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Andrew0613/Anton/internal/buildinfo"
 	"github.com/Andrew0613/Anton/internal/doctor"
+	"github.com/Andrew0613/Anton/internal/handoff"
 	"github.com/Andrew0613/Anton/internal/taskstate"
 	"github.com/Andrew0613/Anton/internal/threads"
 	"github.com/Andrew0613/Anton/internal/versioncmd"
@@ -21,8 +22,9 @@ func globalUsageText() string {
 
 Usage:
   anton doctor [--json]
-  anton task-state <init|pulse|check> [--json]
-  anton threads <doctor|recent|insights> [--json]
+  anton task-state <init|pulse|check|close|reopen|retarget|import> [--json]
+  anton handoff build [--json]
+  anton threads <doctor|recent|insights|brief|recipe> [--json]
   anton version [--json]
 
 Flags:
@@ -42,6 +44,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return doctor.Run(args[1:], stdout, stderr, environ)
 	case "task-state":
 		return taskstate.Run(args[1:], stdout, stderr, environ)
+	case "handoff":
+		return handoff.Run(args[1:], stdout, stderr, environ)
 	case "threads":
 		return threads.Run(args[1:], stdout, stderr, environ)
 	case "version", "--version", "-v":
