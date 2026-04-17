@@ -10,6 +10,7 @@ The current surface is:
 
 - `doctor`
 - `task-state`
+- `handoff`
 - `threads`
 - `version`
 
@@ -124,6 +125,7 @@ Released v0 modules:
 
 - `doctor`
 - `task-state`
+- `handoff`
 - `threads`
 - `version`
 
@@ -133,9 +135,16 @@ Released v0 commands:
 - `anton task-state init`
 - `anton task-state pulse`
 - `anton task-state check`
+- `anton task-state close`
+- `anton task-state reopen`
+- `anton task-state retarget`
+- `anton task-state import`
+- `anton handoff build`
 - `anton threads doctor`
 - `anton threads recent`
 - `anton threads insights`
+- `anton threads brief`
+- `anton threads recipe`
 - `anton version`
 
 Planned later surfaces:
@@ -185,7 +194,9 @@ threads:
 `anton doctor`
 
 - checks writability, repo context, filesystem risk, configured entrypoint, `codex-threads`, and `anton.yaml`
+- includes task identity drift checks and repo contract audit findings
 - use `--json` for a stable execution/config receipt
+- use `--explain` for remediation actions
 
 `anton task-state init`
 
@@ -199,6 +210,29 @@ threads:
 `anton task-state pulse`
 
 - refreshes machine metadata and timestamps in `status.yaml`
+- appends an execution attempt receipt
+
+`anton task-state close`
+
+- moves lifecycle into `blocked|review|partial|done` with closure gates
+- requires stronger closure evidence for `done`
+
+`anton task-state reopen`
+
+- reopens lifecycle to `active` while preserving evidence history
+
+`anton task-state retarget`
+
+- renames the active bundle root and updates `stable.task_id`
+
+`anton task-state import`
+
+- imports external attempt/validation receipts into `status.yaml`
+
+`anton handoff build`
+
+- builds a compact handoff pack from task state and evidence receipts
+- supports human-readable and `--json` outputs
 
 `anton threads doctor`
 
@@ -211,6 +245,14 @@ threads:
 `anton threads insights`
 
 - returns project-scoped aggregate thread signals
+
+`anton threads brief`
+
+- returns a thin scoped brief over `codex-threads threads recent`
+
+`anton threads recipe`
+
+- emits a reusable execution checklist over `codex-threads insights`
 
 `anton version`
 

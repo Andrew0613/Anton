@@ -77,11 +77,13 @@ func (definition Default) EntrypointPath(context Context) string {
 }
 
 type defaultStatus struct {
-	Version int                  `yaml:"version"`
-	Stable  defaultStableSection `yaml:"stable"`
-	State   defaultStateSection  `yaml:"state"`
-	Machine defaultMachine       `yaml:"machine"`
-	Extra   map[string]any       `yaml:",inline"`
+	Version  int                  `yaml:"version"`
+	Stable   defaultStableSection `yaml:"stable"`
+	State    defaultStateSection  `yaml:"state"`
+	Machine  defaultMachine       `yaml:"machine"`
+	Evidence defaultEvidence      `yaml:"evidence"`
+	Closure  defaultClosure       `yaml:"closure"`
+	Extra    map[string]any       `yaml:",inline"`
 }
 
 type defaultStableSection struct {
@@ -94,6 +96,29 @@ type defaultStateSection struct {
 	Lifecycle string         `yaml:"lifecycle"`
 	UpdatedAt string         `yaml:"updated_at"`
 	Extra     map[string]any `yaml:",inline"`
+}
+
+type defaultEvidence struct {
+	Attempts    []defaultEvidenceReceipt `yaml:"attempts"`
+	Validations []defaultEvidenceReceipt `yaml:"validations"`
+	Extra       map[string]any           `yaml:",inline"`
+}
+
+type defaultEvidenceReceipt struct {
+	Command   string   `yaml:"command"`
+	At        string   `yaml:"at"`
+	Outcome   string   `yaml:"outcome"`
+	Validated bool     `yaml:"validated"`
+	Artifacts []string `yaml:"artifacts,omitempty"`
+	Notes     string   `yaml:"notes,omitempty"`
+}
+
+type defaultClosure struct {
+	FinishState          string         `yaml:"finish_state"`
+	NextStep             string         `yaml:"next_step"`
+	Blockers             []string       `yaml:"blockers"`
+	ExpectedDeliverables []string       `yaml:"expected_deliverables"`
+	Extra                map[string]any `yaml:",inline"`
 }
 
 type defaultMachine struct {
@@ -114,7 +139,7 @@ func (Default) ReadStatus(path string) (StatusSnapshot, error) {
 		return StatusSnapshot{}, err
 	}
 
-	return StatusSnapshot{TaskID: status.Stable.TaskID}, nil
+	return snapshotFromDefaultStatus(status), nil
 }
 
 func (Default) InitStatus(context Context, bundle ResolvedTaskBundle, now time.Time) ([]byte, StatusSnapshot, error) {
@@ -135,13 +160,23 @@ func (Default) InitStatus(context Context, bundle ResolvedTaskBundle, now time.T
 			WorkingDirectory: context.WorkingDirectory,
 			WorkspaceKind:    context.WorkspaceKind,
 		},
+		Evidence: defaultEvidence{
+			Attempts:    []defaultEvidenceReceipt{},
+			Validations: []defaultEvidenceReceipt{},
+		},
+		Closure: defaultClosure{
+			FinishState:          "active",
+			NextStep:             "continue implementation and update progress.md",
+			Blockers:             []string{},
+			ExpectedDeliverables: []string{},
+		},
 	}
 
 	content, err := marshalYAML(status)
 	if err != nil {
 		return nil, StatusSnapshot{}, fmt.Errorf("marshal default status: %w", err)
 	}
-	return content, StatusSnapshot{TaskID: taskID}, nil
+	return content, snapshotFromDefaultStatus(status), nil
 }
 
 func (Default) PulseStatus(path string, context Context, now time.Time) ([]byte, StatusSnapshot, error) {
@@ -159,12 +194,19 @@ func (Default) PulseStatus(path string, context Context, now time.Time) ([]byte,
 	status.Machine.ExecutionTarget = context.ExecutionTarget
 	status.Machine.WorkingDirectory = context.WorkingDirectory
 	status.Machine.WorkspaceKind = context.WorkspaceKind
+	status.Evidence.Attempts = append(status.Evidence.Attempts, defaultEvidenceReceipt{
+		Command:   "anton task-state pulse",
+		At:        now.UTC().Format(time.RFC3339),
+		Outcome:   "updated machine metadata and heartbeat timestamp",
+		Validated: false,
+	})
+	status.Closure.FinishState = "active"
 
 	content, err := marshalYAML(status)
 	if err != nil {
 		return nil, StatusSnapshot{}, fmt.Errorf("marshal default status: %w", err)
 	}
-	return content, StatusSnapshot{TaskID: status.Stable.TaskID}, nil
+	return content, snapshotFromDefaultStatus(status), nil
 }
 
 func (definition Default) ResolveThreadsProject(context Context, environ []string, explicit string) ThreadsProject {
@@ -288,6 +330,16 @@ func validateDefaultStatus(path string, status defaultStatus) error {
 	if trimString(status.State.Lifecycle) == "" {
 		return fmt.Errorf("validate %s: missing state.lifecycle", path)
 	}
+	allowedLifecycle := map[string]bool{
+		"active":  true,
+		"blocked": true,
+		"review":  true,
+		"partial": true,
+		"done":    true,
+	}
+	if !allowedLifecycle[trimString(status.State.Lifecycle)] {
+		return fmt.Errorf("validate %s: unsupported state.lifecycle %q", path, status.State.Lifecycle)
+	}
 	if trimString(status.State.UpdatedAt) == "" {
 		return fmt.Errorf("validate %s: missing state.updated_at", path)
 	}
@@ -300,7 +352,33 @@ func validateDefaultStatus(path string, status defaultStatus) error {
 	if trimString(status.Machine.WorkspaceKind) == "" {
 		return fmt.Errorf("validate %s: missing machine.workspace_kind", path)
 	}
+	if trimString(status.Closure.FinishState) == "" {
+		return fmt.Errorf("validate %s: missing closure.finish_state", path)
+	}
+	if !allowedLifecycle[trimString(status.Closure.FinishState)] {
+		return fmt.Errorf("validate %s: unsupported closure.finish_state %q", path, status.Closure.FinishState)
+	}
+	lifecycle := trimString(status.State.Lifecycle)
+	if lifecycle == "blocked" || lifecycle == "review" || lifecycle == "partial" || lifecycle == "done" {
+		if trimString(status.Closure.NextStep) == "" {
+			return fmt.Errorf("validate %s: missing closure.next_step for lifecycle %s", path, lifecycle)
+		}
+	}
 	return nil
+}
+
+func snapshotFromDefaultStatus(status defaultStatus) StatusSnapshot {
+	return StatusSnapshot{
+		TaskID:                   status.Stable.TaskID,
+		Lifecycle:                status.State.Lifecycle,
+		UpdatedAt:                status.State.UpdatedAt,
+		FinishState:              status.Closure.FinishState,
+		NextStep:                 status.Closure.NextStep,
+		BlockerCount:             len(status.Closure.Blockers),
+		ExpectedDeliverableCount: len(status.Closure.ExpectedDeliverables),
+		AttemptCount:             len(status.Evidence.Attempts),
+		ValidationCount:          len(status.Evidence.Validations),
+	}
 }
 
 func fallbackString(value string, defaultValue string) string {

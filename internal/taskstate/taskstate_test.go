@@ -31,7 +31,15 @@ func TestReadStatusParsesExpectedSchema(t *testing.T) {
 		"  host: devbox\n" +
 		"  execution_target: local\n" +
 		"  working_directory: /tmp/example\n" +
-		"  workspace_kind: plain-directory\n"
+		"  workspace_kind: plain-directory\n" +
+		"evidence:\n" +
+		"  attempts: []\n" +
+		"  validations: []\n" +
+		"closure:\n" +
+		"  finish_state: active\n" +
+		"  next_step: continue implementation and update progress.md\n" +
+		"  blockers: []\n" +
+		"  expected_deliverables: []\n"
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write status.yaml: %v", err)
@@ -63,7 +71,15 @@ func TestReadStatusRejectsMissingRequiredFields(t *testing.T) {
 		"  host: devbox\n" +
 		"  execution_target: local\n" +
 		"  working_directory: /tmp/example\n" +
-		"  workspace_kind: plain-directory\n"
+		"  workspace_kind: plain-directory\n" +
+		"evidence:\n" +
+		"  attempts: []\n" +
+		"  validations: []\n" +
+		"closure:\n" +
+		"  finish_state: active\n" +
+		"  next_step: continue implementation and update progress.md\n" +
+		"  blockers: []\n" +
+		"  expected_deliverables: []\n"
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write status.yaml: %v", err)
@@ -286,6 +302,126 @@ func TestTaskStateCheckRuntimeFailureExitCode(t *testing.T) {
 	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_runtime_error.json", replacements)
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCloseDoneRequiresValidationEvidence(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"close", "--json", "--state", "done", "--deliverable", "final handoff", "--next-step", "archive task"}, &stdout, &stderr, env)
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "evidence.validations") {
+		t.Fatalf("stdout missing closure gate failure: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCloseReviewJSON(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"close", "--json", "--state", "review", "--deliverable", "PR opened", "--next-step", "request human review", "--artifact", "PR#1"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+
+	var payload struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			TaskID    string `json:"task_id"`
+			Lifecycle struct {
+				Lifecycle   string `json:"lifecycle"`
+				FinishState string `json:"finish_state"`
+			} `json:"lifecycle"`
+			Evidence struct {
+				ValidationCount int `json:"validation_count"`
+			} `json:"evidence"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected success payload")
+	}
+	if payload.Data.Lifecycle.Lifecycle != "review" || payload.Data.Lifecycle.FinishState != "review" {
+		t.Fatalf("unexpected lifecycle: %+v", payload.Data.Lifecycle)
+	}
+	if payload.Data.Evidence.ValidationCount == 0 {
+		t.Fatalf("expected validation evidence count > 0")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateRetargetJSON(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"retarget", "--json", "--task-id", "demo_task_v2"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+
+	var payload struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.Data.TaskID != "demo_task_v2" {
+		t.Fatalf("task_id = %q, want demo_task_v2", payload.Data.TaskID)
 	}
 }
 

@@ -37,7 +37,7 @@ func TestFindOnPathReturnsExecutableCandidate(t *testing.T) {
 }
 
 func TestParseOptionsRejectsUnexpectedArguments(t *testing.T) {
-	if _, err := parseOptions([]string{"--bad-flag"}, true, 20); err == nil {
+	if _, err := parseOptions([]string{"--bad-flag"}, true, 20, false); err == nil {
 		t.Fatalf("parseOptions should reject unexpected arguments")
 	}
 }
@@ -231,6 +231,66 @@ func TestThreadsInsightsJSONContract(t *testing.T) {
 
 	replacements := threadsReplacements(repoRoot)
 	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_insights_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsBriefJSONContract(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"items\":[{\"id\":\"thread-1\",\"title\":\"Fix scope drift\"}]}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"brief", "--json", "--limit", "3", "--project", "Anton", "--topic", "scope"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	replacements := threadsReplacements(repoRoot)
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_brief_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsRecipeJSONContract(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"insights\":{\"sessions\":5}}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"recipe", "--json", "--limit", "9", "--project", "Anton"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	replacements := threadsReplacements(repoRoot)
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_recipe_success.json", replacements)
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
 	}

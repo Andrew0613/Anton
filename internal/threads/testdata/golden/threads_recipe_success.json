@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "command": "threads recipe",
+  "data": {
+    "adapter": {
+      "adapter": "canonical",
+      "binary_path": "<REPO_ROOT>/bin/codex-threads",
+      "discovery": "path",
+      "working_directory": "<REPO_ROOT>",
+      "config_path": "<REPO_ROOT>/anton.yaml",
+      "config_source": "repo-local anton.yaml",
+      "threads_default_project_strategy": "repo-root",
+      "project": "Anton",
+      "project_source": "flag"
+    },
+    "recipe": {
+      "project": "Anton",
+      "project_source": "flag",
+      "scope_warning": "",
+      "upstream_command": "codex-threads insights --json",
+      "checklist": [
+        "run anton doctor --json before starting",
+        "run anton task-state check --json to verify closure gates",
+        "query codex-threads for only the current project scope",
+        "record validations before moving lifecycle to done"
+      ],
+      "raw": {
+        "ok": true,
+        "insights": {
+          "sessions": 5
+        }
+      }
+    }
+  }
+}

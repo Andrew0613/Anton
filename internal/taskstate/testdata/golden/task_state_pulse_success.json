@@ -12,6 +12,14 @@
     "bundle_root": "<REPO_ROOT>/.anton/state/active/demo_task",
     "status_path": "<REPO_ROOT>/.anton/state/active/demo_task/status.yaml",
     "task_id": "demo_task",
+    "lifecycle": {
+      "lifecycle": "active",
+      "finish_state": "active",
+      "next_step": "continue implementation and update progress.md"
+    },
+    "evidence": {
+      "attempt_count": 1
+    },
     "files": [
       {
         "path": "<REPO_ROOT>/.anton/state/active/demo_task/task_plan.md",

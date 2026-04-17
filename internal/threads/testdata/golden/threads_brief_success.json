@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "command": "threads brief",
+  "data": {
+    "adapter": {
+      "adapter": "canonical",
+      "binary_path": "<REPO_ROOT>/bin/codex-threads",
+      "discovery": "path",
+      "working_directory": "<REPO_ROOT>",
+      "config_path": "<REPO_ROOT>/anton.yaml",
+      "config_source": "repo-local anton.yaml",
+      "threads_default_project_strategy": "repo-root",
+      "project": "Anton",
+      "project_source": "flag"
+    },
+    "brief": {
+      "project": "Anton",
+      "project_source": "flag",
+      "topic": "scope",
+      "scope_warning": "",
+      "recommended_action": "use this brief to resume only the scoped context needed for the current task",
+      "upstream_command": "codex-threads threads recent --json",
+      "raw": {
+        "ok": true,
+        "items": [
+          {
+            "id": "thread-1",
+            "title": "Fix scope drift"
+          }
+        ]
+      }
+    }
+  }
+}
