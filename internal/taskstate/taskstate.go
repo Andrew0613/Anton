@@ -565,7 +565,11 @@ func runRetarget(args []string, stdout io.Writer, stderr io.Writer, environ []st
 		return failCode
 	}
 
-	newRoot := filepath.Join(filepath.Dir(bundle.Root), opts.TaskID)
+	parentRoot := filepath.Dir(bundle.Root)
+	newRoot := filepath.Join(parentRoot, opts.TaskID)
+	if !pathWithinRoot(parentRoot, newRoot) {
+		return writeError("task-state retarget", "task-state-retarget-failed", fmt.Sprintf("retarget path escapes task root: %s", newRoot), opts.JSON, stdout, stderr, 1)
+	}
 	if filepath.Clean(newRoot) != filepath.Clean(bundle.Root) {
 		if _, err := os.Stat(newRoot); err == nil {
 			return writeError("task-state retarget", "task-state-retarget-failed", fmt.Sprintf("target bundle already exists: %s", newRoot), opts.JSON, stdout, stderr, 1)
@@ -796,6 +800,9 @@ func parseRetargetOptions(args []string) (retargetOptions, error) {
 	}
 	if opts.TaskID == "" {
 		return opts, fmt.Errorf("--task-id is required")
+	}
+	if err := adapter.ValidateTaskID(opts.TaskID); err != nil {
+		return opts, fmt.Errorf("invalid --task-id %q: %v", opts.TaskID, err)
 	}
 	return opts, nil
 }
@@ -1045,6 +1052,22 @@ func evidenceFromSnapshot(snapshot adapter.StatusSnapshot) evidenceContract {
 		AttemptCount:    snapshot.AttemptCount,
 		ValidationCount: snapshot.ValidationCount,
 	}
+}
+
+func pathWithinRoot(root string, path string) bool {
+	rootClean := filepath.Clean(root)
+	pathClean := filepath.Clean(path)
+	relative, err := filepath.Rel(rootClean, pathClean)
+	if err != nil {
+		return false
+	}
+	if relative == "." {
+		return true
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return !filepath.IsAbs(relative)
 }
 
 func readTaskStatus(path string) (taskStatus, error) {

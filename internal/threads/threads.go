@@ -532,9 +532,20 @@ func writeResponse(command string, data responseData, asJSON bool, stdout io.Wri
 		_, _ = fmt.Fprintf(stdout, "Warning: %s\n", data.Adapter.ScopeWarning)
 	}
 
-	encoded, _ := json.MarshalIndent(data.Raw, "", "  ")
-	_, _ = fmt.Fprintf(stdout, "\nRaw Payload\n%s\n", string(encoded))
+	label, display := displayPayload(data)
+	encoded, _ := json.MarshalIndent(display, "", "  ")
+	_, _ = fmt.Fprintf(stdout, "\n%s\n%s\n", label, string(encoded))
 	return exitCode
+}
+
+func displayPayload(data responseData) (string, any) {
+	if data.Brief != nil {
+		return "Brief Payload", data.Brief
+	}
+	if data.Recipe != nil {
+		return "Recipe Payload", data.Recipe
+	}
+	return "Raw Payload", data.Raw
 }
 
 func writeError(command string, code string, message string, asJSON bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

@@ -188,7 +188,6 @@ func (Default) PulseStatus(path string, context Context, now time.Time) ([]byte,
 		return nil, StatusSnapshot{}, err
 	}
 
-	status.State.Lifecycle = "active"
 	status.State.UpdatedAt = now.UTC().Format(time.RFC3339)
 	status.Machine.Host = fallbackString(context.Host, "unknown")
 	status.Machine.ExecutionTarget = context.ExecutionTarget
@@ -200,8 +199,6 @@ func (Default) PulseStatus(path string, context Context, now time.Time) ([]byte,
 		Outcome:   "updated machine metadata and heartbeat timestamp",
 		Validated: false,
 	})
-	status.Closure.FinishState = "active"
-
 	content, err := marshalYAML(status)
 	if err != nil {
 		return nil, StatusSnapshot{}, fmt.Errorf("marshal default status: %w", err)

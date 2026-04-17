@@ -296,6 +296,72 @@ func TestThreadsRecipeJSONContract(t *testing.T) {
 	}
 }
 
+func TestThreadsBriefHumanOutputShowsBriefPayload(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"items\":[{\"id\":\"thread-1\"}]}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"brief", "--limit", "2", "--project", "Anton", "--topic", "scope"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Brief Payload") {
+		t.Fatalf("stdout should include Brief Payload header: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Raw Payload\nnull") {
+		t.Fatalf("stdout should not render null raw payload: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsRecipeHumanOutputShowsRecipePayload(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"insights\":{\"sessions\":3}}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"recipe", "--limit", "5", "--project", "Anton"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Recipe Payload") {
+		t.Fatalf("stdout should include Recipe Payload header: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Raw Payload\nnull") {
+		t.Fatalf("stdout should not render null raw payload: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestThreadsRecentUsageErrorExitCode(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

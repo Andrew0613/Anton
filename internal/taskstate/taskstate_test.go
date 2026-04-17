@@ -425,6 +425,109 @@ func TestTaskStateRetargetJSON(t *testing.T) {
 	}
 }
 
+func TestTaskStateInitRejectsTraversalTaskID(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"init", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=../../escaped"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "invalid task id") {
+		t.Fatalf("stdout missing invalid task id error: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStatePulsePreservesClosedLifecycle(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		if code := Run([]string{"close", "--json", "--state", "review", "--deliverable", "PR opened", "--next-step", "request review", "--artifact", "PR#1"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("close exit code = %d, want 0", code)
+		}
+		return Run([]string{"pulse", "--json"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+
+	var payload struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Lifecycle struct {
+				Lifecycle   string `json:"lifecycle"`
+				FinishState string `json:"finish_state"`
+			} `json:"lifecycle"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected success payload")
+	}
+	if payload.Data.Lifecycle.Lifecycle != "review" || payload.Data.Lifecycle.FinishState != "review" {
+		t.Fatalf("pulse should preserve review lifecycle, got %+v", payload.Data.Lifecycle)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateRetargetRejectsInvalidTaskID(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{"retarget", "--json", "--task-id", "../../escaped"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "invalid --task-id") {
+		t.Fatalf("stdout missing invalid task id message: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestPathWithinRoot(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "repo", ".anton", "tasks", "active")
+	inside := filepath.Join(root, "demo_task")
+	outside := filepath.Join(root, "..", "escaped")
+
+	if !pathWithinRoot(root, inside) {
+		t.Fatalf("inside path should be accepted")
+	}
+	if pathWithinRoot(root, outside) {
+		t.Fatalf("outside path should be rejected")
+	}
+}
+
 func taskStateReplacements(repoRoot string) map[string]string {
 	return map[string]string{
 		filepath.Clean(repoRoot):                            "<REPO_ROOT>",
