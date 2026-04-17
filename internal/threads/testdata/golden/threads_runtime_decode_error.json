@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "threads doctor",
+  "error": {
+    "code": "threads-doctor-failed",
+    "message": "decode codex-threads json: unexpected end of JSON input"
+  }
+}

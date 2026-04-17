@@ -77,6 +77,16 @@ independent harness.
 Repos should adapt to Anton through a repo-local `anton.yaml`, not by expecting
 Anton to grow repo-specific runtime logic.
 
+The contract is intentionally bounded. Anton currently supports only:
+
+- `version`
+- `entrypoint.path`
+- `tasks.root`
+- `threads.default_project_strategy`
+- `threads.workspace_roots`
+
+Unknown fields are rejected so contract drift is explicit.
+
 Canonical defaults:
 
 - entrypoint: `AGENTS.md`
@@ -96,6 +106,11 @@ threads:
   workspace_roots:
     - .anton/workspaces
 ```
+
+Config source is always explicit in command output:
+
+- `repo-local anton.yaml` when the file is present and valid
+- `built-in defaults` when `anton.yaml` is missing
 
 Task identity is inferred from:
 

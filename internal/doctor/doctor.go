@@ -124,7 +124,7 @@ func parseOptions(args []string) (options, error) {
 		case "--json":
 			opts.JSON = true
 		default:
-			return options{}, fmt.Errorf("unexpected argument: %s", arg)
+			return opts, fmt.Errorf("unexpected argument: %s", arg)
 		}
 	}
 	return opts, nil
@@ -175,7 +175,7 @@ func collect(environ []string) (reportData, error) {
 		},
 		Config: configContract{
 			Path:                          resolved.Config.Path,
-			Source:                        configSource(resolved.Config),
+			Source:                        resolved.Config.Source(),
 			EntrypointPath:                resolved.Definition.EntrypointPath(contextData),
 			TasksRoot:                     resolved.Config.Tasks.Root,
 			ThreadsDefaultProjectStrategy: resolved.Config.Threads.DefaultProjectStrategy,
@@ -352,13 +352,6 @@ func checkCodexThreads(envMap map[string]string) check {
 		Detail: "codex-threads is not available on PATH",
 		Hint:   "install codex-threads before using anton threads, or skip threads workflows on this host",
 	}
-}
-
-func configSource(config adapter.Config) string {
-	if config.Loaded {
-		return "repo-local anton.yaml"
-	}
-	return "built-in defaults"
 }
 
 func summarizeChecks(checks []check) summary {

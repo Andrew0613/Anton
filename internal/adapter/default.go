@@ -21,6 +21,9 @@ func (Default) Name() string {
 func (definition Default) TaskBundle(context Context, environ []string, now time.Time) (ResolvedTaskBundle, error) {
 	tasksRoot := definition.tasksRoot(context)
 	if current := currentTaskBundleRoot(context.WorkingDirectory, tasksRoot); current != "" {
+		if err := ValidateTaskID(filepath.Base(current)); err != nil {
+			return ResolvedTaskBundle{}, fmt.Errorf("current canonical task bundle root has invalid task id: %w", err)
+		}
 		return ResolvedTaskBundle{
 			Root: current,
 			RequiredFiles: []TaskFile{
@@ -44,6 +47,9 @@ func (definition Default) TaskBundle(context Context, environ []string, now time
 	taskID := inferTaskID(context, environ)
 	if trimString(taskID) == "" {
 		return ResolvedTaskBundle{}, fmt.Errorf("canonical task bundle root could not be inferred; set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing %s bundle", filepath.ToSlash(tasksRoot))
+	}
+	if err := ValidateTaskID(taskID); err != nil {
+		return ResolvedTaskBundle{}, fmt.Errorf("canonical task bundle root inferred invalid task id %q: %w", taskID, err)
 	}
 
 	return ResolvedTaskBundle{

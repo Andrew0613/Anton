@@ -38,8 +38,8 @@ func LoadConfig(context Context) (Config, error) {
 
 	configPath := filepath.Join(base, "anton.yaml")
 	if _, err := os.Stat(configPath); err == nil {
-		if err := readYAMLFile(configPath, &config); err != nil {
-			return Config{}, err
+		if err := readYAMLFileStrict(configPath, &config); err != nil {
+			return Config{}, wrapConfigError(configPath, err)
 		}
 		config.Path = configPath
 		config.Loaded = true
@@ -50,7 +50,7 @@ func LoadConfig(context Context) (Config, error) {
 	}
 
 	if err := validateConfig(config); err != nil {
-		return Config{}, err
+		return Config{}, wrapConfigError(configPath, err)
 	}
 	return config, nil
 }
@@ -82,9 +82,25 @@ func validateConfig(config Config) error {
 		return fmt.Errorf("anton config tasks.root must not be empty")
 	}
 	switch config.Threads.DefaultProjectStrategy {
-	case "", "repo-root", "none":
+	case "repo-root", "none":
 	default:
 		return fmt.Errorf("anton config threads.default_project_strategy must be one of: repo-root, none")
 	}
+	for index, root := range config.Threads.WorkspaceRoots {
+		if trimString(root) == "" {
+			return fmt.Errorf("anton config threads.workspace_roots[%d] must not be empty", index)
+		}
+	}
 	return nil
+}
+
+func wrapConfigError(path string, err error) error {
+	return fmt.Errorf("invalid anton config at %s: %w", path, err)
+}
+
+func (config Config) Source() string {
+	if config.Loaded {
+		return "repo-local anton.yaml"
+	}
+	return "built-in defaults"
 }

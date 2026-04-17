@@ -32,14 +32,21 @@ type summary struct {
 	InvalidCount  int    `json:"invalid_count"`
 }
 
+type configContract struct {
+	Path      string `json:"path"`
+	Source    string `json:"source"`
+	TasksRoot string `json:"tasks_root"`
+}
+
 type commandData struct {
-	Adapter          string       `json:"adapter"`
-	WorkingDirectory string       `json:"working_directory"`
-	BundleRoot       string       `json:"bundle_root"`
-	StatusPath       string       `json:"status_path"`
-	TaskID           string       `json:"task_id,omitempty"`
-	Files            []fileResult `json:"files"`
-	Summary          summary      `json:"summary"`
+	Adapter          string         `json:"adapter"`
+	WorkingDirectory string         `json:"working_directory"`
+	Config           configContract `json:"config"`
+	BundleRoot       string         `json:"bundle_root"`
+	StatusPath       string         `json:"status_path"`
+	TaskID           string         `json:"task_id,omitempty"`
+	Files            []fileResult   `json:"files"`
+	Summary          summary        `json:"summary"`
 }
 
 type errorPayload struct {
@@ -153,6 +160,7 @@ func runInit(args []string, stdout io.Writer, stderr io.Writer, environ []string
 	data := commandData{
 		Adapter:          resolved.Definition.Name(),
 		WorkingDirectory: wd,
+		Config:           buildConfigContract(resolved.Config),
 		BundleRoot:       bundle.Root,
 		StatusPath:       statusPath,
 		TaskID:           taskID,
@@ -208,6 +216,7 @@ func runPulse(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	data := commandData{
 		Adapter:          resolved.Definition.Name(),
 		WorkingDirectory: wd,
+		Config:           buildConfigContract(resolved.Config),
 		BundleRoot:       bundle.Root,
 		StatusPath:       statusPath,
 		TaskID:           chooseTaskID(updatedSnapshot.TaskID, snapshot.TaskID),
@@ -275,6 +284,7 @@ func runCheck(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	data := commandData{
 		Adapter:          resolved.Definition.Name(),
 		WorkingDirectory: wd,
+		Config:           buildConfigContract(resolved.Config),
 		BundleRoot:       bundle.Root,
 		StatusPath:       statusPath,
 		TaskID:           taskID,
@@ -296,7 +306,7 @@ func parseOptions(args []string) (options, error) {
 		case "--json":
 			opts.JSON = true
 		default:
-			return options{}, fmt.Errorf("unexpected argument: %s", arg)
+			return opts, fmt.Errorf("unexpected argument: %s", arg)
 		}
 	}
 	return opts, nil
@@ -429,6 +439,7 @@ func writeResponseWithExit(command string, data commandData, asJSON bool, stdout
 	_, _ = fmt.Fprintf(stdout, "Anton %s\n", command)
 	_, _ = fmt.Fprintf(stdout, "Adapter: %s\n", data.Adapter)
 	_, _ = fmt.Fprintf(stdout, "Status: %s\n", data.Summary.Status)
+	_, _ = fmt.Fprintf(stdout, "Config source: %s\n", data.Config.Source)
 	if data.TaskID != "" {
 		_, _ = fmt.Fprintf(stdout, "Task ID: %s\n", data.TaskID)
 	}
@@ -469,4 +480,12 @@ func chooseTaskID(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildConfigContract(config adapter.Config) configContract {
+	return configContract{
+		Path:      config.Path,
+		Source:    config.Source(),
+		TasksRoot: config.Tasks.Root,
+	}
 }
