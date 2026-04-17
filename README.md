@@ -4,7 +4,7 @@ Reusable harness CLI for agentic repository workflows.
 
 ## Status
 
-`Anton v0.0.1` is the first usable release.
+`Anton v0.0.2` is the current release.
 
 The current surface is:
 
@@ -32,7 +32,7 @@ go build -o ~/.local/bin/anton ./cmd/anton
 After the GitHub tag exists, install from source with:
 
 ```bash
-go install github.com/Andrew0613/Anton/cmd/anton@v0.0.1
+go install github.com/Andrew0613/Anton/cmd/anton@v0.0.2
 ```
 
 Check the installed version:
@@ -261,7 +261,7 @@ threads:
 
 ## Repo-Local Skills
 
-Anton `v0.0.1` includes three thin repo-local skills under `.codex/skills/`:
+Anton `v0.0.2` includes three thin repo-local skills under `.codex/skills/`:
 
 - `harness-audit`
 - `harness-task`

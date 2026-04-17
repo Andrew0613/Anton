@@ -14,7 +14,7 @@ func TestVersionCommand(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if strings.TrimSpace(stdout.String()) != "anton 0.0.1" {
+	if strings.TrimSpace(stdout.String()) != "anton 0.0.2" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -30,7 +30,7 @@ func TestTopLevelVersionFlag(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if strings.TrimSpace(stdout.String()) != "anton 0.0.1" {
+	if strings.TrimSpace(stdout.String()) != "anton 0.0.2" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -46,7 +46,7 @@ func TestVersionCommandJSON(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if !strings.Contains(stdout.String(), `"version": "0.0.1"`) {
+	if !strings.Contains(stdout.String(), `"version": "0.0.2"`) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
