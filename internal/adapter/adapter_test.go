@@ -269,6 +269,39 @@ func TestDefaultTaskBundleUsesConfiguredCanonicalRoot(t *testing.T) {
 	}
 }
 
+func TestDefaultTaskBundleRejectsTraversalTaskIDFromEnv(t *testing.T) {
+	context, err := DetectContext(fixturePath(t, "configured-repo"), nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+
+	definition := Default{Config: mustLoadConfig(t, context)}
+	_, err = definition.TaskBundle(context, []string{"ANTON_TASK_ID=../../escaped"}, time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatalf("TaskBundle should reject traversal task id")
+	}
+	if !strings.Contains(err.Error(), "invalid task id") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestDefaultTaskBundleRejectsTraversalTaskIDFromBranch(t *testing.T) {
+	context, err := DetectContext(fixturePath(t, "configured-repo"), nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	context.GitBranch = "task/.."
+
+	definition := Default{Config: mustLoadConfig(t, context)}
+	_, err = definition.TaskBundle(context, nil, time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatalf("TaskBundle should reject traversal task id")
+	}
+	if !strings.Contains(err.Error(), "invalid task id") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
 func TestDefaultResolveThreadsProject(t *testing.T) {
 	context := Context{
 		WorkingDirectory: fixturePath(t, "repo-root"),
