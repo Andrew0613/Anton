@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "threads recent",
+  "error": {
+    "code": "usage",
+    "message": "unexpected argument: --bad-flag"
+  }
+}

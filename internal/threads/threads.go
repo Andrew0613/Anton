@@ -234,24 +234,24 @@ func parseOptions(args []string, allowLimit bool, defaultLimit int) (options, er
 		case "--project":
 			index++
 			if index >= len(args) {
-				return options{}, fmt.Errorf("missing value for --project")
+				return opts, fmt.Errorf("missing value for --project")
 			}
 			opts.Project = args[index]
 		case "--limit":
 			if !allowLimit {
-				return options{}, fmt.Errorf("--limit is not supported for this command")
+				return opts, fmt.Errorf("--limit is not supported for this command")
 			}
 			index++
 			if index >= len(args) {
-				return options{}, fmt.Errorf("missing value for --limit")
+				return opts, fmt.Errorf("missing value for --limit")
 			}
 			value, err := strconv.Atoi(args[index])
 			if err != nil || value <= 0 {
-				return options{}, fmt.Errorf("invalid --limit value %q", args[index])
+				return opts, fmt.Errorf("invalid --limit value %q", args[index])
 			}
 			opts.Limit = value
 		default:
-			return options{}, fmt.Errorf("unexpected argument: %s", args[index])
+			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}
 	}
 	return opts, nil

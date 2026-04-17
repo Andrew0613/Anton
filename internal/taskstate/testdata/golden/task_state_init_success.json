@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "command": "task-state init",
+  "data": {
+    "adapter": "canonical",
+    "working_directory": "<REPO_ROOT>",
+    "config": {
+      "path": "<REPO_ROOT>/anton.yaml",
+      "source": "repo-local anton.yaml",
+      "tasks_root": ".anton/state"
+    },
+    "bundle_root": "<REPO_ROOT>/.anton/state/active/demo_task",
+    "status_path": "<REPO_ROOT>/.anton/state/active/demo_task/status.yaml",
+    "task_id": "demo_task",
+    "files": [
+      {
+        "path": "<REPO_ROOT>/.anton/state/active/demo_task/task_plan.md",
+        "status": "created",
+        "detail": "created file from Anton template"
+      },
+      {
+        "path": "<REPO_ROOT>/.anton/state/active/demo_task/findings.md",
+        "status": "created",
+        "detail": "created file from Anton template"
+      },
+      {
+        "path": "<REPO_ROOT>/.anton/state/active/demo_task/progress.md",
+        "status": "created",
+        "detail": "created file from Anton template"
+      },
+      {
+        "path": "<REPO_ROOT>/.anton/state/active/demo_task/status.yaml",
+        "status": "created",
+        "detail": "created status.yaml"
+      }
+    ],
+    "summary": {
+      "status": "ok",
+      "created_count": 4,
+      "existing_count": 0,
+      "updated_count": 0,
+      "missing_count": 0,
+      "invalid_count": 0
+    }
+  }
+}

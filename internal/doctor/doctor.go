@@ -124,7 +124,7 @@ func parseOptions(args []string) (options, error) {
 		case "--json":
 			opts.JSON = true
 		default:
-			return options{}, fmt.Errorf("unexpected argument: %s", arg)
+			return opts, fmt.Errorf("unexpected argument: %s", arg)
 		}
 	}
 	return opts, nil

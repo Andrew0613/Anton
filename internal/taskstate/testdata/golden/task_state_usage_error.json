@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "task-state check",
+  "error": {
+    "code": "usage",
+    "message": "unexpected argument: --bad-flag"
+  }
+}

@@ -3,8 +3,12 @@ package taskstate
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -158,34 +162,189 @@ func TestTaskStateCheckJSONUsesConfiguredTasksRoot(t *testing.T) {
 		t.Fatalf("exit code = %d, want 1 because files are intentionally missing", exitCode)
 	}
 
-	var payload struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Config struct {
-				Source    string `json:"source"`
-				TasksRoot string `json:"tasks_root"`
-			} `json:"config"`
-			BundleRoot string `json:"bundle_root"`
-			StatusPath string `json:"status_path"`
-		} `json:"data"`
+	replacements := taskStateReplacements(repoRoot)
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_check_blocked_missing.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+}
+
+func TestTaskStateInitJSONContract(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"init", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_task"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
 	}
-	if payload.Data.Config.Source != "repo-local anton.yaml" {
-		t.Fatalf("config source = %q", payload.Data.Config.Source)
+
+	replacements := taskStateReplacements(repoRoot)
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_init_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
-	if payload.Data.Config.TasksRoot != ".anton/state" {
-		t.Fatalf("tasks root = %q", payload.Data.Config.TasksRoot)
+}
+
+func TestTaskStateCheckJSONContractAfterInit(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"check", "--json"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
 	}
-	wantBundleSuffix := filepath.Join(".anton", "state", "active", "demo_task")
-	if !strings.HasSuffix(payload.Data.BundleRoot, wantBundleSuffix) {
-		t.Fatalf("bundle root = %q, want suffix %q", payload.Data.BundleRoot, wantBundleSuffix)
+
+	replacements := taskStateReplacements(repoRoot)
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_check_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
-	wantStatusSuffix := filepath.Join(".anton", "state", "active", "demo_task", "status.yaml")
-	if !strings.HasSuffix(payload.Data.StatusPath, wantStatusSuffix) {
-		t.Fatalf("status path = %q, want suffix %q", payload.Data.StatusPath, wantStatusSuffix)
+}
+
+func TestTaskStatePulseJSONContract(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		env := []string{"ANTON_TASK_ID=demo_task"}
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"pulse", "--json"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
 	}
+
+	replacements := taskStateReplacements(repoRoot)
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_pulse_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCheckUsageErrorExitCode(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{"check", "--json", "--bad-flag"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_usage_error.json", nil)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCheckRuntimeFailureExitCode(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), "version: 2\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"check", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+
+	replacements := taskStateReplacements(repoRoot)
+	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_runtime_error.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func taskStateReplacements(repoRoot string) map[string]string {
+	return map[string]string{
+		filepath.Clean(repoRoot):                            "<REPO_ROOT>",
+		filepath.Clean(filepath.Join("/private", repoRoot)): "<REPO_ROOT>",
+	}
+}
+
+func assertTaskStateGoldenJSON(t *testing.T, payload []byte, goldenName string, replacements map[string]string) {
+	t.Helper()
+
+	actual := normalizeTaskStateJSON(t, payload, replacements)
+	expectedBytes, err := os.ReadFile(resolveTaskStateGoldenPath(t, goldenName))
+	if err != nil {
+		t.Fatalf("read golden %s: %v", goldenName, err)
+	}
+	expected := normalizeTaskStateJSON(t, expectedBytes, nil)
+	if actual != expected {
+		t.Fatalf("json contract mismatch for %s\n--- actual ---\n%s\n--- expected ---\n%s", goldenName, actual, expected)
+	}
+}
+
+func normalizeTaskStateJSON(t *testing.T, payload []byte, replacements map[string]string) string {
+	t.Helper()
+
+	normalized := string(payload)
+	keys := make([]string, 0, len(replacements))
+	for old := range replacements {
+		keys = append(keys, old)
+	}
+	sort.Slice(keys, func(i int, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, old := range keys {
+		normalized = strings.ReplaceAll(normalized, old, replacements[old])
+	}
+
+	var value any
+	if err := json.Unmarshal([]byte(normalized), &value); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, normalized)
+	}
+
+	canonical, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+	return fmt.Sprintf("%s\n", canonical)
+}
+
+func resolveTaskStateGoldenPath(t *testing.T, name string) string {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("resolve caller path for golden file %s", name)
+	}
+	return filepath.Join(filepath.Dir(thisFile), "testdata", "golden", name)
 }
 
 func bundleFixturePath(name string) string {

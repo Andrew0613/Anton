@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "threads recent",
+  "error": {
+    "code": "threads-recent-failed",
+    "message": "codex-threads is not available on PATH and no ~/.local/bin fallback was found"
+  }
+}

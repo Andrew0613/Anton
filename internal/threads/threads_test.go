@@ -3,8 +3,11 @@ package threads
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -141,6 +144,218 @@ func TestThreadsRecentHonorsConfigProjectStrategy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestThreadsDoctorJSONContract(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"source\":\"doctor\"}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"doctor", "--json"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	replacements := threadsReplacements(repoRoot)
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_doctor_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsRecentJSONContract(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"items\":[{\"id\":\"thread-1\"}]}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"recent", "--json", "--limit", "5", "--project", "Anton"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	replacements := threadsReplacements(repoRoot)
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_recent_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsInsightsJSONContract(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{\"ok\":true,\"insights\":{\"sessions\":3}}'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"insights", "--json", "--limit", "7", "--project", "Anton"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	replacements := threadsReplacements(repoRoot)
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_insights_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsRecentUsageErrorExitCode(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{"recent", "--json", "--bad-flag"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_usage_error.json", nil)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsRecentRuntimeMissingBinaryExitCode(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"recent", "--json"}, &stdout, &stderr, []string{
+			"PATH=",
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_runtime_missing_binary.json", nil)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestThreadsDoctorRuntimeDecodeErrorExitCode(t *testing.T) {
+	repoRoot := makeThreadsTempRepoRoot(t, "repo-root")
+	binDir := filepath.Join(repoRoot, "bin")
+	fakeBinary := filepath.Join(binDir, "codex-threads")
+	writeThreadsFile(t, fakeBinary, "#!/bin/sh\n"+
+		"echo '{'\n",
+	)
+	if err := os.Chmod(fakeBinary, 0o755); err != nil {
+		t.Fatalf("chmod fake binary: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withThreadsWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"doctor", "--json"}, &stdout, &stderr, []string{
+			"PATH=" + binDir,
+			"HOME=" + repoRoot,
+		})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+
+	assertThreadsGoldenJSON(t, stdout.Bytes(), "threads_runtime_decode_error.json", nil)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func threadsReplacements(repoRoot string) map[string]string {
+	return map[string]string{
+		filepath.Clean(repoRoot):                            "<REPO_ROOT>",
+		filepath.Clean(filepath.Join("/private", repoRoot)): "<REPO_ROOT>",
+	}
+}
+
+func assertThreadsGoldenJSON(t *testing.T, payload []byte, goldenName string, replacements map[string]string) {
+	t.Helper()
+
+	actual := normalizeThreadsJSON(t, payload, replacements)
+	expectedBytes, err := os.ReadFile(resolveThreadsGoldenPath(t, goldenName))
+	if err != nil {
+		t.Fatalf("read golden %s: %v", goldenName, err)
+	}
+	expected := normalizeThreadsJSON(t, expectedBytes, nil)
+	if actual != expected {
+		t.Fatalf("json contract mismatch for %s\n--- actual ---\n%s\n--- expected ---\n%s", goldenName, actual, expected)
+	}
+}
+
+func normalizeThreadsJSON(t *testing.T, payload []byte, replacements map[string]string) string {
+	t.Helper()
+
+	normalized := string(payload)
+	keys := make([]string, 0, len(replacements))
+	for old := range replacements {
+		keys = append(keys, old)
+	}
+	sort.Slice(keys, func(i int, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, old := range keys {
+		normalized = strings.ReplaceAll(normalized, old, replacements[old])
+	}
+
+	var value any
+	if err := json.Unmarshal([]byte(normalized), &value); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, normalized)
+	}
+
+	canonical, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+	return fmt.Sprintf("%s\n", canonical)
+}
+
+func resolveThreadsGoldenPath(t *testing.T, name string) string {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("resolve caller path for golden file %s", name)
+	}
+	return filepath.Join(filepath.Dir(thisFile), "testdata", "golden", name)
 }
 
 func withThreadsWorkingDirectory(t *testing.T, path string, fn func() int) int {

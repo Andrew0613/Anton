@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "doctor",
+  "error": {
+    "code": "doctor-failed",
+    "message": "invalid anton config at <REPO_ROOT>/anton.yaml: unsupported anton config version 2"
+  }
+}

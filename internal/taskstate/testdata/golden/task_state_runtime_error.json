@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "task-state check",
+  "error": {
+    "code": "task-state-check-failed",
+    "message": "invalid anton config at <REPO_ROOT>/anton.yaml: unsupported anton config version 2"
+  }
+}

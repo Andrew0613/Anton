@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "command": "threads recent",
+  "data": {
+    "adapter": {
+      "adapter": "canonical",
+      "binary_path": "<REPO_ROOT>/bin/codex-threads",
+      "discovery": "path",
+      "working_directory": "<REPO_ROOT>",
+      "config_path": "<REPO_ROOT>/anton.yaml",
+      "config_source": "repo-local anton.yaml",
+      "threads_default_project_strategy": "repo-root",
+      "project": "Anton",
+      "project_source": "flag"
+    },
+    "raw": {
+      "ok": true,
+      "items": [
+        {
+          "id": "thread-1"
+        }
+      ]
+    }
+  }
+}
