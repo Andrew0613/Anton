@@ -1,7 +1,9 @@
 package adapter
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,6 +115,112 @@ func TestLoadConfigDefaultsWhenAntonYAMLIsMissing(t *testing.T) {
 	wantPath := filepath.Join(fixturePath(t, "repo-root"), "anton.yaml")
 	if config.Path != wantPath {
 		t.Fatalf("config path = %q, want %q", config.Path, wantPath)
+	}
+}
+
+func TestLoadConfigRejectsInvalidAntonYAML(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "unsupported-version",
+			content: "" +
+				"version: 2\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: repo-root\n",
+			want: "unsupported anton config version 2",
+		},
+		{
+			name: "unknown-field",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: repo-root\n" +
+				"unexpected_key: true\n",
+			want: "field unexpected_key not found",
+		},
+		{
+			name: "multiple-documents",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: repo-root\n" +
+				"---\n" +
+				"unexpected_key: true\n",
+			want: "multiple YAML documents are not supported",
+		},
+		{
+			name: "empty-entrypoint-path",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: \"\"\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: repo-root\n",
+			want: "anton config entrypoint.path must not be empty",
+		},
+		{
+			name: "empty-tasks-root",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: \"\"\n" +
+				"threads:\n  default_project_strategy: repo-root\n",
+			want: "anton config tasks.root must not be empty",
+		},
+		{
+			name: "invalid-strategy",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: invalid\n",
+			want: "anton config threads.default_project_strategy must be one of: repo-root, none",
+		},
+		{
+			name: "empty-workspace-root",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"threads:\n  default_project_strategy: repo-root\n  workspace_roots:\n    - \"\"\n",
+			want: "anton config threads.workspace_roots[0] must not be empty",
+		},
+	}
+
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			repoRoot := makeTempRepoRoot(t)
+			configPath := filepath.Join(repoRoot, "anton.yaml")
+			if err := os.WriteFile(configPath, []byte(testCase.content), 0o644); err != nil {
+				t.Fatalf("write anton.yaml: %v", err)
+			}
+
+			context, err := DetectContext(repoRoot, nil)
+			if err != nil {
+				t.Fatalf("DetectContext returned error: %v", err)
+			}
+
+			_, err = LoadConfig(context)
+			if err == nil {
+				t.Fatalf("LoadConfig should fail")
+			}
+			if !strings.Contains(err.Error(), "invalid anton config at "+configPath) {
+				t.Fatalf("error = %q", err.Error())
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), testCase.want)
+			}
+		})
 	}
 }
 
@@ -249,4 +357,18 @@ func mustLoadConfig(t *testing.T, context Context) Config {
 		t.Fatalf("LoadConfig returned error: %v", err)
 	}
 	return config
+}
+
+func makeTempRepoRoot(t *testing.T) string {
+	t.Helper()
+
+	repoRoot := t.TempDir()
+	gitDir := filepath.Join(repoRoot, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write .git/HEAD: %v", err)
+	}
+	return repoRoot
 }

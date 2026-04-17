@@ -25,6 +25,9 @@ type adapterInfo struct {
 	BinaryPath       string `json:"binary_path"`
 	Discovery        string `json:"discovery"`
 	WorkingDirectory string `json:"working_directory"`
+	ConfigPath       string `json:"config_path"`
+	ConfigSource     string `json:"config_source"`
+	ThreadsStrategy  string `json:"threads_default_project_strategy"`
 	Project          string `json:"project,omitempty"`
 	ProjectSource    string `json:"project_source,omitempty"`
 	ScopeWarning     string `json:"scope_warning,omitempty"`
@@ -100,6 +103,9 @@ func runDoctor(args []string, stdout io.Writer, stderr io.Writer, environ []stri
 			BinaryPath:       binaryPath,
 			Discovery:        discovery,
 			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			ThreadsStrategy:  resolved.Config.Threads.DefaultProjectStrategy,
 		},
 		Raw: raw,
 	}
@@ -151,6 +157,9 @@ func runRecent(args []string, stdout io.Writer, stderr io.Writer, environ []stri
 			BinaryPath:       binaryPath,
 			Discovery:        discovery,
 			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			ThreadsStrategy:  resolved.Config.Threads.DefaultProjectStrategy,
 			Project:          project,
 			ProjectSource:    source,
 			ScopeWarning:     scopeWarning(project),
@@ -204,6 +213,9 @@ func runInsights(args []string, stdout io.Writer, stderr io.Writer, environ []st
 			BinaryPath:       binaryPath,
 			Discovery:        discovery,
 			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			ThreadsStrategy:  resolved.Config.Threads.DefaultProjectStrategy,
 			Project:          project,
 			ProjectSource:    source,
 			ScopeWarning:     scopeWarning(project),
@@ -356,6 +368,7 @@ func writeResponse(command string, data responseData, asJSON bool, stdout io.Wri
 	_, _ = fmt.Fprintf(stdout, "Adapter: %s\n", data.Adapter.Adapter)
 	_, _ = fmt.Fprintf(stdout, "Binary: %s\n", data.Adapter.BinaryPath)
 	_, _ = fmt.Fprintf(stdout, "Discovery: %s\n", data.Adapter.Discovery)
+	_, _ = fmt.Fprintf(stdout, "Config source: %s\n", data.Adapter.ConfigSource)
 	_, _ = fmt.Fprintf(stdout, "Working dir: %s\n", data.Adapter.WorkingDirectory)
 	if data.Adapter.Project != "" {
 		_, _ = fmt.Fprintf(stdout, "Project: %s (%s)\n", data.Adapter.Project, data.Adapter.ProjectSource)
