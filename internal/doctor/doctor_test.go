@@ -40,6 +40,21 @@ func TestCheckAntonConfigReportsLoadedFile(t *testing.T) {
 	}
 }
 
+func TestCheckAntonConfigReportsInheritedSource(t *testing.T) {
+	result := checkAntonConfig(adapter.Config{
+		Path:      "/tmp/main/anton.yaml",
+		Loaded:    true,
+		Inherited: true,
+	})
+
+	if result.Status != statusOK {
+		t.Fatalf("status = %q, want %q", result.Status, statusOK)
+	}
+	if !strings.Contains(result.Detail, "inherited main-checkout anton.yaml") {
+		t.Fatalf("detail = %q", result.Detail)
+	}
+}
+
 func TestCheckAntonConfigReportsMissingFile(t *testing.T) {
 	result := checkAntonConfig(adapter.Config{
 		Path: "/tmp/repo/anton.yaml",

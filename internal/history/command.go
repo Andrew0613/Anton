@@ -96,7 +96,7 @@ func runSync(args []string, stdout io.Writer, stderr io.Writer, environ []string
 		SessionRoot: opts.SessionRoot,
 		FileLimit:   opts.Limit,
 	})
-	workReceipts, workWarnings := scanProjectWorkMemory(root, WorkMemoryOptions{FileLimit: opts.Limit})
+	workReceipts, workWarnings := scanProjectWorkMemory(root, environ, WorkMemoryOptions{FileLimit: opts.Limit})
 	candidates := append(archiveReceipts, workReceipts...)
 	sortReceipts(candidates)
 

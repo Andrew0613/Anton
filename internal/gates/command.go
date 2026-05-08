@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
 )
@@ -111,23 +110,49 @@ func loadSet(opts options, environ []string) (Set, error) {
 	if err != nil {
 		return Set{}, err
 	}
-	context, err := adapter.DetectContext(wd, environ)
+	resolved, err := adapter.Resolve(wd, environ)
 	if err != nil {
 		return Set{}, err
 	}
-	base := context.WorkingDirectory
-	if context.RepositoryRoot != "" {
-		base = context.RepositoryRoot
-	}
 
-	configPath := filepath.Join(base, "anton.yaml")
-	if _, err := os.Stat(configPath); err == nil {
-		return LoadFile(configPath, "repo-local anton.yaml")
-	} else if os.IsNotExist(err) {
-		return EmptySet(configPath), nil
-	} else {
-		return Set{}, fmt.Errorf("stat %s: %w", configPath, err)
+	if resolved.Config.Loaded {
+		return setFromAdapterConfig(resolved.Config), nil
 	}
+	return EmptySet(resolved.Config.Path), nil
+}
+
+func setFromAdapterConfig(config adapter.Config) Set {
+	gates := make([]Gate, 0, len(config.Gates))
+	for _, gate := range config.Gates {
+		converted := Gate{
+			Name:        gate.Name,
+			Type:        gate.Type,
+			RequiredFor: gate.RequiredFor,
+			Description: gate.Description,
+			Destructive: gate.Destructive,
+		}
+		if gate.Command != nil {
+			converted.Command = &CommandMetadata{
+				Argv:             gate.Command.Argv,
+				WorkingDirectory: gate.Command.WorkingDirectory,
+			}
+		}
+		if gate.Timeout != nil {
+			converted.Timeout = &TimeoutMetadata{Seconds: gate.Timeout.Seconds}
+		}
+		gates = append(gates, converted)
+	}
+	set := Set{
+		Source: Source{
+			Path:   config.Path,
+			Source: config.Source(),
+			Loaded: config.Loaded,
+		},
+		Gates: normalizeGates(gates),
+	}
+	set.Findings = validateGates(set.Gates)
+	set.Summary = summarize(set.Gates, set.Findings)
+	return set
 }
 
 func writeUsage(stderr io.Writer) int {

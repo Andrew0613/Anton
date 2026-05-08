@@ -60,6 +60,7 @@ type HistoryExtensionConfig struct {
 
 func LoadConfig(context Context) (Config, error) {
 	config := defaultConfig()
+	validationPath := ""
 
 	base := context.WorkingDirectory
 	if context.RepositoryRoot != "" {
@@ -67,6 +68,7 @@ func LoadConfig(context Context) (Config, error) {
 	}
 
 	configPath := filepath.Join(base, "anton.yaml")
+	validationPath = configPath
 	if _, err := os.Stat(configPath); err == nil {
 		if err := readYAMLFileStrict(configPath, &config); err != nil {
 			return Config{}, wrapConfigError(configPath, err)
@@ -79,6 +81,7 @@ func LoadConfig(context Context) (Config, error) {
 				return Config{}, wrapConfigError(inheritedPath, err)
 			}
 			config.Path = inheritedPath
+			validationPath = inheritedPath
 			config.Loaded = true
 			config.Inherited = true
 		} else {
@@ -89,7 +92,7 @@ func LoadConfig(context Context) (Config, error) {
 	}
 
 	if err := validateConfig(config); err != nil {
-		return Config{}, wrapConfigError(configPath, err)
+		return Config{}, wrapConfigError(validationPath, err)
 	}
 	return config, nil
 }

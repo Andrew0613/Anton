@@ -382,7 +382,7 @@ func checkAntonConfig(config adapter.Config) check {
 		return check{
 			Name:   "anton-config",
 			Status: statusOK,
-			Detail: fmt.Sprintf("loaded repo-local anton.yaml from %s", config.Path),
+			Detail: fmt.Sprintf("loaded %s from %s", config.Source(), config.Path),
 		}
 	}
 

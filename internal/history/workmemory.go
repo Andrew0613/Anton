@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Andrew0613/Anton/internal/adapter"
 )
 
 const (
@@ -21,25 +23,13 @@ type WorkMemoryOptions struct {
 	FileLimit int
 }
 
-type historyConfig struct {
-	Version int `yaml:"version"`
-	Tasks   struct {
-		Root string `yaml:"root"`
-	} `yaml:"tasks"`
-	Extensions struct {
-		History struct {
-			WorkRecordRoots []string `yaml:"work_record_roots"`
-		} `yaml:"history"`
-	} `yaml:"extensions"`
-}
-
-func scanProjectWorkMemory(repoRoot string, opts WorkMemoryOptions) ([]Receipt, []Warning) {
+func scanProjectWorkMemory(repoRoot string, environ []string, opts WorkMemoryOptions) ([]Receipt, []Warning) {
 	limit := opts.FileLimit
 	if limit <= 0 {
 		limit = defaultWorkFileLimit
 	}
 
-	config, warnings := loadHistoryConfig(repoRoot)
+	config, warnings := loadHistoryConfig(repoRoot, environ)
 	tasksRoot := strings.TrimSpace(config.Tasks.Root)
 	if tasksRoot == "" {
 		tasksRoot = ".anton/tasks"
@@ -64,52 +54,16 @@ func scanProjectWorkMemory(repoRoot string, opts WorkMemoryOptions) ([]Receipt, 
 	return receipts, warnings
 }
 
-func loadHistoryConfig(repoRoot string) (historyConfig, []Warning) {
-	config := historyConfig{Version: 1}
-	path := filepath.Join(repoRoot, "anton.yaml")
-	content, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		config.Tasks.Root = ".anton/tasks"
-		return config, nil
-	}
+func loadHistoryConfig(repoRoot string, environ []string) (adapter.Config, []Warning) {
+	context, err := adapter.DetectContext(repoRoot, environ)
 	if err != nil {
-		return config, []Warning{{Code: "history-config-read-failed", Message: err.Error(), Path: path}}
+		return adapter.Config{Tasks: adapter.TasksConfig{Root: ".anton/tasks"}}, []Warning{{Code: "history-config-read-failed", Message: err.Error(), Path: repoRoot}}
 	}
-	parseHistoryConfigSubset(string(content), &config)
+	config, err := adapter.LoadConfig(context)
+	if err != nil {
+		return adapter.Config{Tasks: adapter.TasksConfig{Root: ".anton/tasks"}}, []Warning{{Code: "history-config-read-failed", Message: err.Error(), Path: repoRoot}}
+	}
 	return config, nil
-}
-
-func parseHistoryConfigSubset(content string, config *historyConfig) {
-	section := ""
-	inHistoryExtension := false
-	for _, rawLine := range strings.Split(content, "\n") {
-		line := strings.TrimRight(rawLine, " \t")
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		switch {
-		case indent == 0 && strings.HasPrefix(trimmed, "tasks:"):
-			section = "tasks"
-			inHistoryExtension = false
-		case indent == 0 && strings.HasPrefix(trimmed, "extensions:"):
-			section = "extensions"
-			inHistoryExtension = false
-		case section == "tasks" && indent >= 2 && strings.HasPrefix(trimmed, "root:"):
-			config.Tasks.Root = unquoteYAMLScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "root:")))
-		case section == "extensions" && indent >= 2 && strings.HasPrefix(trimmed, "history:"):
-			inHistoryExtension = true
-		case section == "extensions" && inHistoryExtension && strings.HasPrefix(trimmed, "- "):
-			config.Extensions.History.WorkRecordRoots = append(config.Extensions.History.WorkRecordRoots, unquoteYAMLScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))))
-		}
-	}
-}
-
-func unquoteYAMLScalar(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
-	return value
 }
 
 func scanTaskBundles(repoRoot, tasksRoot string, limit int) ([]Receipt, []Warning) {
@@ -132,6 +86,10 @@ func scanTaskBundles(repoRoot, tasksRoot string, limit int) ([]Receipt, []Warnin
 			return nil
 		}
 		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			warnings = append(warnings, Warning{Code: "working-memory-symlink-refused", Message: "task bundle files must be regular repo-local files, not symlinks", Path: path})
 			return nil
 		}
 		name := entry.Name()
@@ -159,7 +117,10 @@ func scanTaskBundles(repoRoot, tasksRoot string, limit int) ([]Receipt, []Warnin
 
 func scanMemoryEvents(repoRoot string, limit int) ([]Receipt, []Warning) {
 	path := filepath.Join(repoRoot, ".anton", "memory", "events.jsonl")
-	file, err := os.Open(path)
+	file, warning, err := openRegularWorkFile(path)
+	if warning.Code != "" {
+		return nil, []Warning{warning}
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -281,7 +242,11 @@ func declaredWorkFiles(root string, limit int) ([]string, []Warning) {
 func workFileReceipts(files []string, receiptType, sourceKind string, warnings []Warning) ([]Receipt, []Warning) {
 	var receipts []Receipt
 	for _, path := range files {
-		content, err := os.ReadFile(path)
+		content, warning, err := readRegularWorkFile(path)
+		if warning.Code != "" {
+			warnings = append(warnings, warning)
+			continue
+		}
 		if err != nil {
 			warnings = append(warnings, Warning{Code: "working-memory-read-failed", Message: err.Error(), Path: path})
 			continue
@@ -302,6 +267,41 @@ func workFileReceipts(files []string, receiptType, sourceKind string, warnings [
 		receipts = append(receipts, newReceipt(receiptType, Source{Kind: sourceKind, Path: path}, fileModTime(path), "high", content, nil))
 	}
 	return receipts, warnings
+}
+
+func readRegularWorkFile(path string) ([]byte, Warning, error) {
+	_, warning, err := lstatRegularWorkFile(path)
+	if warning.Code != "" || err != nil {
+		return nil, warning, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, Warning{}, err
+	}
+	return content, Warning{}, nil
+}
+
+func openRegularWorkFile(path string) (*os.File, Warning, error) {
+	_, warning, err := lstatRegularWorkFile(path)
+	if warning.Code != "" || err != nil {
+		return nil, warning, err
+	}
+	file, err := os.Open(path)
+	return file, Warning{}, err
+}
+
+func lstatRegularWorkFile(path string) (os.FileInfo, Warning, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, Warning{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, Warning{Code: "working-memory-symlink-refused", Message: "working memory files must be regular repo-local files, not symlinks", Path: path}, nil
+	}
+	if !info.Mode().IsRegular() {
+		return nil, Warning{Code: "working-memory-nonregular-refused", Message: "working memory files must be regular files", Path: path}, nil
+	}
+	return info, Warning{}, nil
 }
 
 func malformedStatusYAML(content []byte) bool {

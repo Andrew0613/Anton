@@ -3,6 +3,7 @@ package history
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,71 @@ func TestRunSyncRefusesSymlinkedHistoryDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outsideDir, "receipts.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("outside receipt store should not be created, stat err=%v", err)
 	}
+}
+
+func TestRunSyncRefusesSymlinkedTaskBundleFile(t *testing.T) {
+	root := t.TempDir()
+	outsideFile := filepath.Join(root, "outside-secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("external secret should not be ingested\n"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	progressPath := filepath.Join(root, ".anton", "tasks", "active", "demo", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(progressPath), 0o755); err != nil {
+		t.Fatalf("mkdir task bundle: %v", err)
+	}
+	if err := os.Symlink(outsideFile, progressPath); err != nil {
+		t.Fatalf("symlink progress: %v", err)
+	}
+
+	withWorkingDirectory(t, root, func() {
+		payload := runHistoryJSON(t, []string{"sync", "--json", "--sessions-root", filepath.Join(root, "missing")}, []string{"HOME=" + root})
+		if payload.Data == nil || !hasWarningCode(payload.Data.Warnings, "working-memory-symlink-refused") {
+			t.Fatalf("expected symlink warning: %#v", payload.Data)
+		}
+		for _, receipt := range payload.Data.Receipts {
+			if strings.Contains(receipt.Summary, "external secret") {
+				t.Fatalf("symlink target content was ingested: %#v", receipt)
+			}
+		}
+	})
+
+	storeContent, err := os.ReadFile(filepath.Join(root, ".anton", "history", "receipts.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read receipt store: %v", err)
+	}
+	if strings.Contains(string(storeContent), "external secret") {
+		t.Fatalf("receipt store contains symlink target content: %s", string(storeContent))
+	}
+}
+
+func TestRunSyncRefusesSymlinkedMemoryEvents(t *testing.T) {
+	root := t.TempDir()
+	outsideFile := filepath.Join(root, "outside-events.jsonl")
+	if err := os.WriteFile(outsideFile, []byte(`{"timestamp":"2026-05-08T01:02:03Z","message":"external event should not be ingested"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write outside events: %v", err)
+	}
+	memoryPath := filepath.Join(root, ".anton", "memory", "events.jsonl")
+	if err := os.MkdirAll(filepath.Dir(memoryPath), 0o755); err != nil {
+		t.Fatalf("mkdir memory dir: %v", err)
+	}
+	if err := os.Symlink(outsideFile, memoryPath); err != nil {
+		t.Fatalf("symlink events: %v", err)
+	}
+
+	withWorkingDirectory(t, root, func() {
+		payload := runHistoryJSON(t, []string{"sync", "--json", "--sessions-root", filepath.Join(root, "missing")}, []string{"HOME=" + root})
+		if payload.Data == nil || !hasWarningCode(payload.Data.Warnings, "working-memory-symlink-refused") {
+			t.Fatalf("expected symlink warning: %#v", payload.Data)
+		}
+		for _, receipt := range payload.Data.Receipts {
+			if strings.Contains(receipt.Summary, "external event") {
+				t.Fatalf("symlink target content was ingested: %#v", receipt)
+			}
+		}
+	})
 }
 
 func runHistoryJSON(t *testing.T, args []string, env []string) response {
