@@ -1,0 +1,8 @@
+{
+  "command": "gates check",
+  "error": {
+    "code": "usage",
+    "message": "unexpected argument: --bad"
+  },
+  "ok": false
+}

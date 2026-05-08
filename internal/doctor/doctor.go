@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
+	"github.com/Andrew0613/Anton/internal/contract"
 )
 
 const (
@@ -83,6 +84,7 @@ type reportData struct {
 	Context        contextContract      `json:"context"`
 	Config         configContract       `json:"config"`
 	TaskIdentity   adapter.TaskIdentity `json:"task_identity"`
+	Contract       contract.ContractV1  `json:"contract"`
 	PromptContract string               `json:"prompt_contract"`
 	Checks         []check              `json:"checks"`
 	Remediation    []remediation        `json:"remediation,omitempty"`
@@ -154,6 +156,14 @@ func parseOptions(args []string) (options, error) {
 	return opts, nil
 }
 
+func CollectContract(environ []string) (contract.ContractV1, error) {
+	data, err := collect(environ)
+	if err != nil {
+		return contract.ContractV1{}, err
+	}
+	return data.Contract, nil
+}
+
 func collect(environ []string) (reportData, error) {
 	envValues := envMap(environ)
 
@@ -193,14 +203,31 @@ func collect(environ []string) (reportData, error) {
 		checkTaskIdentity(taskIdentity),
 		checkContractAudit(contractAudit),
 	}
+	summaryData := summarizeChecks(checks)
+	contractData := contract.Build(contract.Input{
+		Adapter:        resolved.Definition.Name(),
+		Context:        contextData,
+		Config:         resolved.Config,
+		EntrypointPath: entrypointPath,
+		TaskIdentity:   taskIdentity,
+		FilesystemType: filesystemType,
+		Checks:         checksToContract(checks),
+		Findings:       findingsToContract(contractAudit),
+		Summary: contract.Summary{
+			Status:        summaryData.Status,
+			OKCount:       summaryData.OKCount,
+			DegradedCount: summaryData.DegradedCount,
+			BlockedCount:  summaryData.BlockedCount,
+		},
+	})
 
 	data := reportData{
 		Adapter: resolved.Definition.Name(),
 		Environment: environment{
 			ExecutionTarget: contextData.ExecutionTarget,
 			Host:            contextData.Host,
-			OperatingSystem: runtime.GOOS,
-			Architecture:    runtime.GOARCH,
+			OperatingSystem: contractData.Environment.OperatingSystem,
+			Architecture:    contractData.Environment.Architecture,
 			FilesystemType:  filesystemType,
 		},
 		Config: configContract{
@@ -213,14 +240,41 @@ func collect(environ []string) (reportData, error) {
 		},
 		Context:        context,
 		TaskIdentity:   taskIdentity,
-		PromptContract: renderPromptContract(contextData.ExecutionTarget, context, taskIdentity),
+		Contract:       contractData,
+		PromptContract: contractData.PromptContract,
 		Checks:         checks,
 		Remediation:    buildRemediation(checks, contractAudit),
 		ContractAudit:  contractAudit,
-		Summary:        summarizeChecks(checks),
+		Summary:        summaryData,
 	}
 
 	return data, nil
+}
+
+func checksToContract(checks []check) []contract.Check {
+	result := make([]contract.Check, 0, len(checks))
+	for _, item := range checks {
+		result = append(result, contract.Check{
+			Name:   item.Name,
+			Status: item.Status,
+			Detail: item.Detail,
+			Hint:   item.Hint,
+		})
+	}
+	return result
+}
+
+func findingsToContract(findings []contractFinding) []contract.Finding {
+	result := make([]contract.Finding, 0, len(findings))
+	for _, item := range findings {
+		result = append(result, contract.Finding{
+			Level:   item.Level,
+			Code:    item.Code,
+			File:    item.File,
+			Message: item.Message,
+		})
+	}
+	return result
 }
 
 func envMap(environ []string) map[string]string {
@@ -328,7 +382,7 @@ func checkAntonConfig(config adapter.Config) check {
 		return check{
 			Name:   "anton-config",
 			Status: statusOK,
-			Detail: fmt.Sprintf("loaded repo-local anton.yaml from %s", config.Path),
+			Detail: fmt.Sprintf("loaded %s from %s", config.Source(), config.Path),
 		}
 	}
 
@@ -522,36 +576,6 @@ func buildRemediation(checks []check, findings []contractFinding) []remediation 
 		})
 	}
 	return actions
-}
-
-func renderPromptContract(executionTarget string, context contextContract, identity adapter.TaskIdentity) string {
-	lines := []string{
-		fmt.Sprintf("Execution target: %s", executionTarget),
-		fmt.Sprintf("Working directory: %s", context.WorkingDirectory),
-		fmt.Sprintf("Workspace kind: %s", context.WorkspaceKind),
-	}
-
-	if context.RepositoryRoot != "" {
-		lines = append(lines, fmt.Sprintf("Repository root: %s", context.RepositoryRoot))
-	}
-	if context.RepositoryKind != "" {
-		lines = append(lines, fmt.Sprintf("Repository kind: %s", context.RepositoryKind))
-	}
-	if context.GitBranch != "" {
-		lines = append(lines, fmt.Sprintf("Git branch: %s", context.GitBranch))
-	}
-	if len(context.ScopePaths) > 0 {
-		lines = append(lines, fmt.Sprintf("Scope paths: %s", strings.Join(context.ScopePaths, ", ")))
-	}
-	if identity.Conflict {
-		lines = append(lines, fmt.Sprintf("Task identity conflict: %s", strings.Join(identity.ConflictValues, ", ")))
-	} else if strings.TrimSpace(identity.Resolved) != "" {
-		lines = append(lines, fmt.Sprintf("Inferred task id: %s", identity.Resolved))
-	} else {
-		lines = append(lines, "Inferred task id: unresolved")
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 func renderHuman(stdout io.Writer, output report, explain bool) {

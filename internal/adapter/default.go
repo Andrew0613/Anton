@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,20 @@ import (
 )
 
 var genericTaskBranchPattern = regexp.MustCompile(`^task(?:/[^/]+)*/([^/]+)$`)
+
+var ErrTaskIdentityRequired = errors.New("task identity required")
+
+type TaskIdentityRequiredError struct {
+	TasksRoot string
+}
+
+func (err TaskIdentityRequiredError) Error() string {
+	return fmt.Sprintf("task identity required; set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing %s bundle", filepath.ToSlash(err.TasksRoot))
+}
+
+func (err TaskIdentityRequiredError) Unwrap() error {
+	return ErrTaskIdentityRequired
+}
 
 type Default struct {
 	Config Config
@@ -46,7 +61,7 @@ func (definition Default) TaskBundle(context Context, environ []string, now time
 
 	taskID := inferTaskID(context, environ)
 	if trimString(taskID) == "" {
-		return ResolvedTaskBundle{}, fmt.Errorf("canonical task bundle root could not be inferred; set ANTON_TASK_ID, use a task/<id_slug> branch, or run inside an existing %s bundle", filepath.ToSlash(tasksRoot))
+		return ResolvedTaskBundle{}, TaskIdentityRequiredError{TasksRoot: tasksRoot}
 	}
 	if err := ValidateTaskID(taskID); err != nil {
 		return ResolvedTaskBundle{}, fmt.Errorf("canonical task bundle root inferred invalid task id %q: %w", taskID, err)

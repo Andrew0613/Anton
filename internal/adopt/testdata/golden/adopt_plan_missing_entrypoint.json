@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "command": "adopt plan",
+  "data": {
+    "adapter": "canonical",
+    "working_directory": "<REPO_ROOT>",
+    "workspace_kind": "git-repo-root",
+    "repository_root": "<REPO_ROOT>",
+    "config": {
+      "source": "repo-local anton.yaml",
+      "path": "<REPO_ROOT>/anton.yaml",
+      "entrypoint_path": "<REPO_ROOT>/AGENTS.md",
+      "tasks_root": ".anton/tasks",
+      "tasks_root_path": "<REPO_ROOT>/.anton/tasks"
+    },
+    "gaps": [
+      {
+        "code": "entrypoint-missing",
+        "module": "entrypoint",
+        "severity": "warning",
+        "source": "contract.config.entrypoint_path",
+        "confidence": "high",
+        "path": "<REPO_ROOT>/AGENTS.md",
+        "detail": "configured entrypoint file is missing",
+        "remediation": [
+          "create the configured entrypoint file and keep it short, with detailed workflow docs linked from docs/"
+        ]
+      }
+    ],
+    "summary": {
+      "status": "advisory",
+      "gap_count": 1,
+      "info_count": 0,
+      "warning_count": 1,
+      "blocked_count": 0
+    }
+  }
+}

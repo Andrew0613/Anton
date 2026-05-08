@@ -1,0 +1,45 @@
+{
+  "command": "gates list",
+  "data": {
+    "findings": [],
+    "gates": [
+      {
+        "command": {
+          "argv": [
+            "go",
+            "test",
+            "./..."
+          ]
+        },
+        "description": "Go package tests.",
+        "name": "unit-tests",
+        "required_for": [
+          "done"
+        ],
+        "timeout": {
+          "seconds": 120
+        },
+        "type": "command"
+      },
+      {
+        "description": "Record remaining integration notes before handoff.",
+        "name": "reviewer-note",
+        "type": "manual"
+      }
+    ],
+    "source": {
+      "loaded": true,
+      "path": "testdata/config/success.yaml",
+      "source": "explicit config"
+    },
+    "summary": {
+      "declared": 2,
+      "destructive": 0,
+      "errors": 0,
+      "required": 1,
+      "unsafe": 0,
+      "warnings": 0
+    }
+  },
+  "ok": true
+}

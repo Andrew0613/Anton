@@ -1,0 +1,8 @@
+version: 1
+gates:
+  - name: ""
+    type: shell
+    required_for:
+      - ship
+    timeout:
+      seconds: 0

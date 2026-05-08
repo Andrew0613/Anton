@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
+	"github.com/Andrew0613/Anton/internal/contract"
+	"github.com/Andrew0613/Anton/internal/doctor"
 )
 
 type options struct {
@@ -17,18 +19,20 @@ type options struct {
 }
 
 type pack struct {
-	Objective              string   `json:"objective"`
-	Scope                  []string `json:"scope"`
-	TaskID                 string   `json:"task_id"`
-	Lifecycle              string   `json:"lifecycle"`
-	FinishState            string   `json:"finish_state"`
-	ExpectedDeliverables   int      `json:"expected_deliverable_count"`
-	Blockers               int      `json:"blocker_count"`
-	NextStep               string   `json:"next_step"`
-	ValidationReceiptCount int      `json:"validation_receipt_count"`
-	AttemptReceiptCount    int      `json:"attempt_receipt_count"`
-	StatusPath             string   `json:"status_path"`
-	GeneratedAt            string   `json:"generated_at"`
+	Objective              string              `json:"objective"`
+	Scope                  []string            `json:"scope"`
+	TaskID                 string              `json:"task_id"`
+	Lifecycle              string              `json:"lifecycle"`
+	FinishState            string              `json:"finish_state"`
+	ExpectedDeliverables   int                 `json:"expected_deliverable_count"`
+	Blockers               int                 `json:"blocker_count"`
+	NextStep               string              `json:"next_step"`
+	ValidationReceiptCount int                 `json:"validation_receipt_count"`
+	AttemptReceiptCount    int                 `json:"attempt_receipt_count"`
+	StatusPath             string              `json:"status_path"`
+	Contract               contract.ContractV1 `json:"contract"`
+	Warnings               []string            `json:"warnings,omitempty"`
+	GeneratedAt            string              `json:"generated_at"`
 }
 
 type response struct {
@@ -74,6 +78,10 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	if err != nil {
 		return writeError("handoff build", "handoff-build-failed", err.Error(), opts.JSON, stdout, stderr, 1)
 	}
+	contractData, err := doctor.CollectContract(environ)
+	if err != nil {
+		return writeError("handoff build", "handoff-build-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
 	bundle, err := resolved.Definition.TaskBundle(resolved.Context, environ, time.Now().UTC())
 	if err != nil {
 		return writeError("handoff build", "handoff-build-failed", err.Error(), opts.JSON, stdout, stderr, 1)
@@ -103,6 +111,8 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 		ValidationReceiptCount: snapshot.ValidationCount,
 		AttemptReceiptCount:    snapshot.AttemptCount,
 		StatusPath:             statusPath,
+		Contract:               contractData,
+		Warnings:               handoffWarnings(snapshot, contractData),
 		GeneratedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -127,6 +137,14 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	_, _ = fmt.Fprintf(stdout, "Next step: %s\n", output.NextStep)
 	_, _ = fmt.Fprintf(stdout, "Receipts: attempts=%d validations=%d\n", output.AttemptReceiptCount, output.ValidationReceiptCount)
 	return 0
+}
+
+func handoffWarnings(snapshot adapter.StatusSnapshot, contractData contract.ContractV1) []string {
+	warnings := []string{}
+	if contractData.TaskIdentity.Resolved != "" && snapshot.TaskID != "" && contractData.TaskIdentity.Resolved != snapshot.TaskID {
+		warnings = append(warnings, fmt.Sprintf("contract task identity %q differs from status task id %q", contractData.TaskIdentity.Resolved, snapshot.TaskID))
+	}
+	return warnings
 }
 
 func parseOptions(args []string) (options, error) {

@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "memory status",
+  "error": {
+    "code": "memory-corrupt",
+    "message": "corrupt memory log at <REPO_ROOT>/.anton/memory/events.jsonl line 1: invalid character 'b' looking for beginning of object key string"
+  }
+}

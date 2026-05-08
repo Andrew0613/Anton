@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "command": "memory status",
+  "data": {
+    "adapter": "canonical",
+    "working_directory": "<REPO_ROOT>",
+    "config": {
+      "path": "<REPO_ROOT>/anton.yaml",
+      "source": "repo-local anton.yaml",
+      "entrypoint_path": "<REPO_ROOT>/AGENTS.md",
+      "tasks_root": ".anton/tasks"
+    },
+    "memory_path": "<REPO_ROOT>/.anton/memory/events.jsonl",
+    "entries": [
+      {
+        "schema_version": "anton.memory.event.v1",
+        "key": "handoff.next_step",
+        "value": "old handoff note",
+        "source": "chat",
+        "freshness": "<TIMESTAMP>",
+        "confidence": "medium",
+        "author": "agent",
+        "recorded_at": "<TIMESTAMP>",
+        "advisory": true,
+        "freshness_status": "stale",
+        "warnings": [
+          "memory freshness <TIMESTAMP> is older than 720h0m0s"
+        ]
+      }
+    ],
+    "warnings": [
+      {
+        "level": "warning",
+        "code": "memory-stale",
+        "key": "handoff.next_step",
+        "message": "memory key \"handoff.next_step\" is stale; treat it as advisory context only"
+      }
+    ],
+    "summary": {
+      "status": "ok",
+      "missing": false,
+      "entry_count": 1,
+      "stale_count": 1,
+      "conflict_count": 0,
+      "warning_count": 1
+    }
+  }
+}

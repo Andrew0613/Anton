@@ -1,0 +1,7 @@
+version: 1
+gates:
+  - name: unit-tests
+    type: command
+    required_for:
+      - done
+    description: Missing command metadata should block a required command gate.

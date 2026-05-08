@@ -40,6 +40,21 @@ func TestCheckAntonConfigReportsLoadedFile(t *testing.T) {
 	}
 }
 
+func TestCheckAntonConfigReportsInheritedSource(t *testing.T) {
+	result := checkAntonConfig(adapter.Config{
+		Path:      "/tmp/main/anton.yaml",
+		Loaded:    true,
+		Inherited: true,
+	})
+
+	if result.Status != statusOK {
+		t.Fatalf("status = %q, want %q", result.Status, statusOK)
+	}
+	if !strings.Contains(result.Detail, "inherited main-checkout anton.yaml") {
+		t.Fatalf("detail = %q", result.Detail)
+	}
+}
+
 func TestCheckAntonConfigReportsMissingFile(t *testing.T) {
 	result := checkAntonConfig(adapter.Config{
 		Path: "/tmp/repo/anton.yaml",
@@ -121,7 +136,7 @@ func TestDoctorJSONContextReceiptAcrossWorkspaceKinds(t *testing.T) {
 		},
 		{
 			name:              "git-worktree",
-			path:              doctorFixturePath("worktree"),
+			path:              makeDoctorTempLinkedWorktree(t),
 			wantWorkspaceKind: "git-worktree",
 		},
 		{
@@ -257,6 +272,32 @@ func normalizeDoctorJSON(t *testing.T, payload []byte, replacements map[string]s
 		parsed.Data.Environment.OperatingSystem = "<OPERATING_SYSTEM>"
 		parsed.Data.Environment.Architecture = "<ARCHITECTURE>"
 		parsed.Data.Environment.FilesystemType = "<FILESYSTEM_TYPE>"
+		if parsed.Data.Contract.SchemaVersion != "" {
+			if strings.TrimSpace(parsed.Data.Contract.Environment.Host) != "" {
+				parsed.Data.Contract.Environment.Host = "<HOST>"
+			}
+			parsed.Data.Contract.Environment.OperatingSystem = "<OPERATING_SYSTEM>"
+			parsed.Data.Contract.Environment.Architecture = "<ARCHITECTURE>"
+			parsed.Data.Contract.Environment.FilesystemType = "<FILESYSTEM_TYPE>"
+			parsed.Data.Contract.Summary.OKCount = -1
+			parsed.Data.Contract.Summary.DegradedCount = -1
+			for index := range parsed.Data.Contract.Checks {
+				switch parsed.Data.Contract.Checks[index].Name {
+				case "filesystem-type":
+					parsed.Data.Contract.Checks[index].Status = "<FILESYSTEM_STATUS>"
+					parsed.Data.Contract.Checks[index].Detail = "<FILESYSTEM_DETAIL>"
+					if strings.TrimSpace(parsed.Data.Contract.Checks[index].Hint) != "" {
+						parsed.Data.Contract.Checks[index].Hint = "<FILESYSTEM_HINT>"
+					}
+				case "go-toolchain":
+					parsed.Data.Contract.Checks[index].Status = "<GO_TOOLCHAIN_STATUS>"
+					parsed.Data.Contract.Checks[index].Detail = "<GO_TOOLCHAIN_DETAIL>"
+					if strings.TrimSpace(parsed.Data.Contract.Checks[index].Hint) != "" {
+						parsed.Data.Contract.Checks[index].Hint = "<GO_TOOLCHAIN_HINT>"
+					}
+				}
+			}
+		}
 		parsed.Data.Summary.OKCount = -1
 		parsed.Data.Summary.DegradedCount = -1
 		for index := range parsed.Data.Checks {
@@ -332,6 +373,29 @@ func makeDoctorTempRepoRoot(t *testing.T) string {
 	}
 	writeDoctorFile(t, filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
 	return repoRoot
+}
+
+func makeDoctorTempLinkedWorktree(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	mainRoot := filepath.Join(root, "main")
+	worktreeRoot := filepath.Join(root, "wt")
+	worktreeGitDir := filepath.Join(mainRoot, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(worktreeGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree gitdir: %v", err)
+	}
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(mainRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir main gitdir: %v", err)
+	}
+	writeDoctorFile(t, filepath.Join(mainRoot, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeDoctorFile(t, filepath.Join(worktreeRoot, ".git"), "gitdir: "+worktreeGitDir+"\n")
+	writeDoctorFile(t, filepath.Join(worktreeGitDir, "HEAD"), "ref: refs/heads/task/anton-bootstrap\n")
+	writeDoctorFile(t, filepath.Join(worktreeGitDir, "commondir"), "../..\n")
+	return worktreeRoot
 }
 
 func writeDoctorFile(t *testing.T, path string, content string) {
