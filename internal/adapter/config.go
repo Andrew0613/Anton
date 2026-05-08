@@ -11,6 +11,8 @@ type Config struct {
 	Entrypoint EntrypointConfig `yaml:"entrypoint"`
 	Tasks      TasksConfig      `yaml:"tasks"`
 	Threads    ThreadsConfig    `yaml:"threads"`
+	Gates      []GateConfig     `yaml:"gates"`
+	Extensions ExtensionsConfig `yaml:"extensions"`
 	Path       string           `yaml:"-"`
 	Loaded     bool             `yaml:"-"`
 	Inherited  bool             `yaml:"-"`
@@ -27,6 +29,33 @@ type TasksConfig struct {
 type ThreadsConfig struct {
 	DefaultProjectStrategy string   `yaml:"default_project_strategy"`
 	WorkspaceRoots         []string `yaml:"workspace_roots"`
+}
+
+type GateConfig struct {
+	Name        string             `yaml:"name"`
+	Type        string             `yaml:"type"`
+	RequiredFor []string           `yaml:"required_for"`
+	Description string             `yaml:"description"`
+	Command     *GateCommandConfig `yaml:"command"`
+	Timeout     *GateTimeoutConfig `yaml:"timeout"`
+	Destructive bool               `yaml:"destructive"`
+}
+
+type GateCommandConfig struct {
+	Argv             []string `yaml:"argv"`
+	WorkingDirectory string   `yaml:"working_directory"`
+}
+
+type GateTimeoutConfig struct {
+	Seconds int `yaml:"seconds"`
+}
+
+type ExtensionsConfig struct {
+	History HistoryExtensionConfig `yaml:"history"`
+}
+
+type HistoryExtensionConfig struct {
+	WorkRecordRoots []string `yaml:"work_record_roots"`
 }
 
 func LoadConfig(context Context) (Config, error) {
@@ -115,6 +144,7 @@ func defaultConfig() Config {
 			DefaultProjectStrategy: "repo-root",
 			WorkspaceRoots:         []string{},
 		},
+		Gates: []GateConfig{},
 	}
 }
 
@@ -136,6 +166,11 @@ func validateConfig(config Config) error {
 	for index, root := range config.Threads.WorkspaceRoots {
 		if trimString(root) == "" {
 			return fmt.Errorf("anton config threads.workspace_roots[%d] must not be empty", index)
+		}
+	}
+	for index, root := range config.Extensions.History.WorkRecordRoots {
+		if trimString(root) == "" {
+			return fmt.Errorf("anton config extensions.history.work_record_roots[%d] must not be empty", index)
 		}
 	}
 	return nil

@@ -131,19 +131,110 @@ func TestRunSyncMissingSessionsWarnsButSucceeds(t *testing.T) {
 	})
 }
 
+func TestRunSyncRefusesSymlinkedReceiptStore(t *testing.T) {
+	root := t.TempDir()
+	sessionRoot := filepath.Join(root, "codex", "sessions")
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeFile(t, filepath.Join(sessionRoot, "rollout.jsonl"), `{"timestamp":"2026-05-08T01:02:03Z","type":"user","message":"hello"}`+"\n")
+
+	historyDir := filepath.Join(root, ".anton", "history")
+	if err := os.MkdirAll(historyDir, 0o755); err != nil {
+		t.Fatalf("mkdir history dir: %v", err)
+	}
+	outsideFile := filepath.Join(root, "outside-receipts.jsonl")
+	if err := os.WriteFile(outsideFile, []byte("sentinel\n"), 0o644); err != nil {
+		t.Fatalf("write outside receipt file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(historyDir, "receipts.jsonl")); err != nil {
+		t.Fatalf("symlink receipts: %v", err)
+	}
+
+	withWorkingDirectory(t, root, func() {
+		payload, stdout, stderr := runHistoryJSONWithExit(t, []string{"sync", "--json", "--sessions-root", sessionRoot}, []string{"HOME=" + root}, 1)
+		if payload.OK {
+			t.Fatalf("sync should refuse symlinked receipt store: stdout=%s stderr=%s", stdout, stderr)
+		}
+		if payload.Data == nil || !hasWarningCode(payload.Data.Warnings, receiptStoreSymlinkCode) {
+			t.Fatalf("expected symlink warning: %#v", payload.Data)
+		}
+	})
+
+	content, err := os.ReadFile(outsideFile)
+	if err != nil {
+		t.Fatalf("read outside file: %v", err)
+	}
+	if string(content) != "sentinel\n" {
+		t.Fatalf("outside file was modified: %q", string(content))
+	}
+}
+
+func TestRunSyncRefusesSymlinkedHistoryDirectory(t *testing.T) {
+	root := t.TempDir()
+	sessionRoot := filepath.Join(root, "codex", "sessions")
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeFile(t, filepath.Join(sessionRoot, "rollout.jsonl"), `{"timestamp":"2026-05-08T01:02:03Z","type":"user","message":"hello"}`+"\n")
+
+	if err := os.MkdirAll(filepath.Join(root, ".anton"), 0o755); err != nil {
+		t.Fatalf("mkdir .anton: %v", err)
+	}
+	outsideDir := filepath.Join(root, "outside-history")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("mkdir outside dir: %v", err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(root, ".anton", "history")); err != nil {
+		t.Fatalf("symlink history dir: %v", err)
+	}
+
+	withWorkingDirectory(t, root, func() {
+		payload, stdout, stderr := runHistoryJSONWithExit(t, []string{"sync", "--json", "--sessions-root", sessionRoot}, []string{"HOME=" + root}, 1)
+		if payload.OK {
+			t.Fatalf("sync should refuse symlinked history dir: stdout=%s stderr=%s", stdout, stderr)
+		}
+		if payload.Data == nil || !hasWarningCode(payload.Data.Warnings, receiptStoreSymlinkCode) {
+			t.Fatalf("expected symlink warning: %#v", payload.Data)
+		}
+	})
+
+	if _, err := os.Stat(filepath.Join(outsideDir, "receipts.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("outside receipt store should not be created, stat err=%v", err)
+	}
+}
+
 func runHistoryJSON(t *testing.T, args []string, env []string) response {
+	t.Helper()
+	payload, stdout, stderr := runHistoryJSONWithExit(t, args, env, 0)
+	if !payload.OK {
+		t.Fatalf("expected ok response: stdout=%s stderr=%s", stdout, stderr)
+	}
+	return payload
+}
+
+func runHistoryJSONWithExit(t *testing.T, args []string, env []string, wantExit int) (response, string, string) {
 	t.Helper()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := Run(args, &stdout, &stderr, env)
-	if exitCode != 0 {
-		t.Fatalf("exit code = %d stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	if exitCode != wantExit {
+		t.Fatalf("exit code = %d, want %d stdout=%s stderr=%s", exitCode, wantExit, stdout.String(), stderr.String())
 	}
 	var payload response
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v\n%s", err, stdout.String())
 	}
-	return payload
+	return payload, stdout.String(), stderr.String()
+}
+
+func hasWarningCode(warnings []Warning, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFile(t *testing.T, path string, content string) {

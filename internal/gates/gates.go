@@ -84,6 +84,7 @@ type rawConfig struct {
 	Tasks      map[string]any `yaml:"tasks"`
 	Threads    map[string]any `yaml:"threads"`
 	Gates      []Gate         `yaml:"gates"`
+	Extensions map[string]any `yaml:"extensions"`
 }
 
 func Parse(data []byte, source Source) (Set, error) {

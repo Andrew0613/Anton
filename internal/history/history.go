@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	storeRelativePath = ".anton/history/receipts.jsonl"
-	maxSummaryBytes   = 1200
+	storeRelativePath          = ".anton/history/receipts.jsonl"
+	receiptStoreSymlinkCode    = "receipt-store-symlink-refused"
+	receiptStoreSymlinkMessage = "history receipt store must be a regular repo-local path, not a symlink"
+	maxSummaryBytes            = 1200
 )
 
 type Receipt struct {
@@ -60,6 +62,13 @@ func (store Store) Path() string {
 }
 
 func (store Store) Read() StoreReadResult {
+	if warning, ok := store.symlinkWarning(); ok {
+		return StoreReadResult{
+			Receipts: []Receipt{},
+			Warnings: []Warning{warning},
+		}
+	}
+
 	file, err := os.Open(store.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return StoreReadResult{Receipts: []Receipt{}}
@@ -114,6 +123,9 @@ func (store Store) AppendNew(receipts []Receipt) (int, []Warning) {
 	if len(receipts) == 0 {
 		return 0, nil
 	}
+	if warning, ok := store.symlinkWarning(); ok {
+		return 0, []Warning{warning}
+	}
 
 	existing := store.Read()
 	known := make(map[string]bool, len(existing.Receipts))
@@ -162,6 +174,36 @@ func (store Store) AppendNew(receipts []Receipt) (int, []Warning) {
 		}
 	}
 	return len(toAppend), existing.Warnings
+}
+
+func (store Store) symlinkWarning() (Warning, bool) {
+	for _, path := range store.guardPaths() {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return Warning{
+				Code:    "receipt-store-lstat-failed",
+				Message: err.Error(),
+				Path:    path,
+			}, true
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return Warning{
+				Code:    receiptStoreSymlinkCode,
+				Message: receiptStoreSymlinkMessage,
+				Path:    path,
+			}, true
+		}
+	}
+	return Warning{}, false
+}
+
+func (store Store) guardPaths() []string {
+	historyDir := filepath.Dir(store.path)
+	antonDir := filepath.Dir(historyDir)
+	return []string{antonDir, historyDir, store.path}
 }
 
 func newReceipt(receiptType string, source Source, timestamp time.Time, confidence string, content []byte, payload map[string]string) Receipt {

@@ -75,7 +75,11 @@ func runShow(args []string, stdout io.Writer, stderr io.Writer, environ []string
 		Receipts:     result.Receipts,
 		Warnings:     result.Warnings,
 	}
-	return writeResponse("history show", data, opts.JSON, stdout, 0)
+	exitCode := 0
+	if hasFatalStoreWarning(result.Warnings) {
+		exitCode = 1
+	}
+	return writeResponse("history show", data, opts.JSON, stdout, exitCode)
 }
 
 func runSync(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
@@ -113,7 +117,11 @@ func runSync(args []string, stdout io.Writer, stderr io.Writer, environ []string
 		SessionRoot:    firstNonEmpty(opts.SessionRoot, defaultCodexSessionRoot(environ)),
 		ScannedSources: len(candidates),
 	}
-	return writeResponse("history sync", data, opts.JSON, stdout, 0)
+	exitCode := 0
+	if hasFatalStoreWarning(warnings) {
+		exitCode = 1
+	}
+	return writeResponse("history sync", data, opts.JSON, stdout, exitCode)
 }
 
 func workingRoot(environ []string) (string, error) {
@@ -184,7 +192,7 @@ Native Anton history stores append-only evidence receipts at .anton/history/rece
 
 func writeResponse(command string, data responseData, jsonOutput bool, stdout io.Writer, exitCode int) int {
 	if jsonOutput {
-		payload := response{OK: true, Command: command, Data: &data}
+		payload := response{OK: exitCode == 0, Command: command, Data: &data}
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		_ = encoder.Encode(payload)
@@ -199,6 +207,15 @@ func writeResponse(command string, data responseData, jsonOutput bool, stdout io
 	}
 	_, _ = io.WriteString(stdout, "\n")
 	return exitCode
+}
+
+func hasFatalStoreWarning(warnings []Warning) bool {
+	for _, warning := range warnings {
+		if warning.Code == receiptStoreSymlinkCode || warning.Code == "receipt-store-lstat-failed" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeError(command string, code string, message string, jsonOutput bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

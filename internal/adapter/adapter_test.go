@@ -118,6 +118,46 @@ func TestLoadConfigDefaultsWhenAntonYAMLIsMissing(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
+	repoRoot := makeTempRepoRoot(t)
+	configPath := filepath.Join(repoRoot, "anton.yaml")
+	content := "" +
+		"version: 1\n" +
+		"entrypoint:\n  path: AGENTS.md\n" +
+		"tasks:\n  root: .anton/tasks\n" +
+		"threads:\n  default_project_strategy: repo-root\n" +
+		"gates:\n" +
+		"  - name: go-test\n" +
+		"    type: command\n" +
+		"    required_for: [review]\n" +
+		"    command:\n" +
+		"      argv: [go, test, ./...]\n" +
+		"    timeout:\n" +
+		"      seconds: 120\n" +
+		"extensions:\n" +
+		"  history:\n" +
+		"    work_record_roots:\n" +
+		"      - worklog\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write anton.yaml: %v", err)
+	}
+
+	context, err := DetectContext(repoRoot, nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if len(config.Gates) != 1 || config.Gates[0].Name != "go-test" {
+		t.Fatalf("gates = %#v", config.Gates)
+	}
+	if len(config.Extensions.History.WorkRecordRoots) != 1 || config.Extensions.History.WorkRecordRoots[0] != "worklog" {
+		t.Fatalf("history extensions = %#v", config.Extensions.History)
+	}
+}
+
 func TestLoadConfigInheritsMainCheckoutConfigForLinkedWorktree(t *testing.T) {
 	root := t.TempDir()
 	mainRoot := filepath.Join(root, "main")

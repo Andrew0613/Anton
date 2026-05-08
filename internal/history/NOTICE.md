@@ -7,4 +7,3 @@ MIT-licensed sibling `codex-threads` project, but this first slice does not copy
 Rust source code. If later changes port source or substantially derived logic
 from `codex-threads`, keep the MIT license attribution and source-boundary notes
 in this file.
-
