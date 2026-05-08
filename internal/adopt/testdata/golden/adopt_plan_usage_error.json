@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "adopt plan",
+  "error": {
+    "code": "usage",
+    "message": "unexpected argument: --bad-flag"
+  }
+}

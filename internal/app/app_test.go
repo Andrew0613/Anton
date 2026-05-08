@@ -53,3 +53,16 @@ func TestVersionCommandJSON(t *testing.T) {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
+
+func TestTaskAliasNotRegisteredInSliceOne(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"task", "--json"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "unknown command: task") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}

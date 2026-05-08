@@ -1,0 +1,52 @@
+{
+  "command": "gates check",
+  "data": {
+    "findings": [
+      {
+        "code": "unsafe-command-content",
+        "field": "command.argv[2]",
+        "gate": "unsafe-shell",
+        "level": "warning",
+        "message": "command metadata contains shell-like content; it is reported but never executed by this surface"
+      },
+      {
+        "code": "destructive-gate-inert",
+        "field": "destructive",
+        "gate": "unsafe-shell",
+        "level": "warning",
+        "message": "destructive gate metadata is visible only; anton gates does not execute commands"
+      }
+    ],
+    "gates": [
+      {
+        "command": {
+          "argv": [
+            "sh",
+            "-c",
+            "echo unsafe \u003e testdata/config/unsafe_inert.yaml"
+          ]
+        },
+        "destructive": true,
+        "name": "unsafe-shell",
+        "required_for": [
+          "done"
+        ],
+        "type": "command"
+      }
+    ],
+    "source": {
+      "loaded": true,
+      "path": "testdata/config/unsafe_inert.yaml",
+      "source": "explicit config"
+    },
+    "summary": {
+      "declared": 1,
+      "destructive": 1,
+      "errors": 0,
+      "required": 1,
+      "unsafe": 1,
+      "warnings": 2
+    }
+  },
+  "ok": true
+}

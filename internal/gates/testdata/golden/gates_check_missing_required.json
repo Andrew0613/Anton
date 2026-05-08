@@ -1,0 +1,38 @@
+{
+  "command": "gates check",
+  "data": {
+    "findings": [
+      {
+        "code": "missing-command-argv",
+        "field": "command.argv",
+        "gate": "unit-tests",
+        "level": "error",
+        "message": "required command gate must declare command.argv metadata"
+      }
+    ],
+    "gates": [
+      {
+        "description": "Missing command metadata should block a required command gate.",
+        "name": "unit-tests",
+        "required_for": [
+          "done"
+        ],
+        "type": "command"
+      }
+    ],
+    "source": {
+      "loaded": true,
+      "path": "testdata/config/missing_required.yaml",
+      "source": "explicit config"
+    },
+    "summary": {
+      "declared": 1,
+      "destructive": 0,
+      "errors": 1,
+      "required": 1,
+      "unsafe": 0,
+      "warnings": 0
+    }
+  },
+  "ok": false
+}

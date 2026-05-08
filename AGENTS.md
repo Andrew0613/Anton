@@ -14,7 +14,9 @@ This repo defines the reusable `Anton` harness.
 
 - Keep this repo focused on reusable harness infrastructure.
 - Do not absorb repo-specific business logic from downstream projects.
-- Treat `codex-threads` as a dependency surface, not as something to overwrite.
+- Treat `codex-threads` as an upstream source surface: Anton history may absorb
+  compatible archive-reader behavior with attribution, but must not become a
+  repo-specific wrapper or overwrite the upstream project.
 - Prefer one canonical Anton contract plus repo-local `anton.yaml` over repo-specific runtime adapters.
 - Keep `AGENTS.md` and `README.md` short; put detailed design in `docs/`.
 

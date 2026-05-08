@@ -1,0 +1,59 @@
+{
+  "command": "gates check",
+  "data": {
+    "findings": [
+      {
+        "code": "missing-gate-name",
+        "field": "name",
+        "gate": "gates[0]",
+        "level": "error",
+        "message": "gate name must not be empty"
+      },
+      {
+        "code": "invalid-gate-type",
+        "field": "type",
+        "gate": "gates[0]",
+        "level": "error",
+        "message": "gate type \"shell\" must be one of: command, manual, external"
+      },
+      {
+        "code": "invalid-required-for",
+        "field": "required_for",
+        "gate": "gates[0]",
+        "level": "error",
+        "message": "required_for value \"ship\" must be one of: blocked, review, partial, done"
+      },
+      {
+        "code": "invalid-timeout",
+        "field": "timeout.seconds",
+        "gate": "gates[0]",
+        "level": "error",
+        "message": "timeout.seconds must be greater than zero when declared"
+      }
+    ],
+    "gates": [
+      {
+        "name": "",
+        "required_for": [
+          "ship"
+        ],
+        "timeout": {},
+        "type": "shell"
+      }
+    ],
+    "source": {
+      "loaded": true,
+      "path": "testdata/config/malformed.yaml",
+      "source": "explicit config"
+    },
+    "summary": {
+      "declared": 1,
+      "destructive": 0,
+      "errors": 4,
+      "required": 1,
+      "unsafe": 0,
+      "warnings": 0
+    }
+  },
+  "ok": false
+}

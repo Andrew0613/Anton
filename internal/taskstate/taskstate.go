@@ -2,6 +2,7 @@ package taskstate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -199,7 +200,7 @@ func runInit(args []string, stdout io.Writer, stderr io.Writer, environ []string
 	now := time.Now().UTC()
 	bundle, err := resolved.Definition.TaskBundle(resolved.Context, environ, now)
 	if err != nil {
-		return writeError("task-state init", "task-state-init-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+		return writeTaskBundleError("task-state init", err, opts.JSON, stdout, stderr)
 	}
 	context := resolved.Context
 	statusPath := bundle.StatusPath()
@@ -290,7 +291,7 @@ func runPulse(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 
 	bundle, err := resolved.Definition.TaskBundle(resolved.Context, environ, time.Now().UTC())
 	if err != nil {
-		return writeError("task-state pulse", "task-state-pulse-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+		return writeTaskBundleError("task-state pulse", err, opts.JSON, stdout, stderr)
 	}
 	context := resolved.Context
 	statusPath := bundle.StatusPath()
@@ -353,7 +354,7 @@ func runCheck(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 
 	bundle, err := resolved.Definition.TaskBundle(resolved.Context, environ, time.Now().UTC())
 	if err != nil {
-		return writeError("task-state check", "task-state-check-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+		return writeTaskBundleError("task-state check", err, opts.JSON, stdout, stderr)
 	}
 	files := validateBundle(bundle.Root, bundle)
 	statusPath := bundle.StatusPath()
@@ -852,7 +853,7 @@ func resolveRuntime(command string, stdout io.Writer, stderr io.Writer, environ 
 	}
 	bundle, err := resolved.Definition.TaskBundle(resolved.Context, environ, time.Now().UTC())
 	if err != nil {
-		_ = writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+		_ = writeTaskBundleError(command, err, opts.JSON, stdout, stderr)
 		return "", adapter.Resolved{}, adapter.ResolvedTaskBundle{}, "", 1
 	}
 	return wd, resolved, bundle, bundle.StatusPath(), 0
@@ -1018,6 +1019,14 @@ func writeError(command string, code string, message string, asJSON bool, stdout
 
 	_, _ = fmt.Fprintf(stderr, "%s\n", message)
 	return exitCode
+}
+
+func writeTaskBundleError(command string, err error, asJSON bool, stdout io.Writer, stderr io.Writer) int {
+	var taskIdentityErr adapter.TaskIdentityRequiredError
+	if errors.As(err, &taskIdentityErr) {
+		return writeError(command, "task-identity-required", taskIdentityErr.Error(), asJSON, stdout, stderr, 1)
+	}
+	return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), asJSON, stdout, stderr, 1)
 }
 
 func chooseTaskID(values ...string) string {

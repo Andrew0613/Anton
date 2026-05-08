@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "command": "adopt plan",
+  "data": {
+    "adapter": "canonical",
+    "working_directory": "<REPO_ROOT>",
+    "workspace_kind": "git-repo-root",
+    "repository_root": "<REPO_ROOT>",
+    "config": {
+      "source": "repo-local anton.yaml",
+      "path": "<REPO_ROOT>/anton.yaml",
+      "entrypoint_path": "<REPO_ROOT>/AGENTS.md",
+      "tasks_root": ".anton/tasks",
+      "tasks_root_path": "<REPO_ROOT>/.anton/tasks"
+    },
+    "gaps": [],
+    "summary": {
+      "status": "ok",
+      "gap_count": 0,
+      "info_count": 0,
+      "warning_count": 0,
+      "blocked_count": 0
+    }
+  }
+}

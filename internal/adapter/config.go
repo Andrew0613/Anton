@@ -13,6 +13,7 @@ type Config struct {
 	Threads    ThreadsConfig    `yaml:"threads"`
 	Path       string           `yaml:"-"`
 	Loaded     bool             `yaml:"-"`
+	Inherited  bool             `yaml:"-"`
 }
 
 type EntrypointConfig struct {
@@ -44,7 +45,16 @@ func LoadConfig(context Context) (Config, error) {
 		config.Path = configPath
 		config.Loaded = true
 	} else if os.IsNotExist(err) {
-		config.Path = configPath
+		if inheritedPath := inheritedWorktreeConfigPath(context); inheritedPath != "" {
+			if err := readYAMLFileStrict(inheritedPath, &config); err != nil {
+				return Config{}, wrapConfigError(inheritedPath, err)
+			}
+			config.Path = inheritedPath
+			config.Loaded = true
+			config.Inherited = true
+		} else {
+			config.Path = configPath
+		}
 	} else if err != nil {
 		return Config{}, fmt.Errorf("stat %s: %w", configPath, err)
 	}
@@ -53,6 +63,43 @@ func LoadConfig(context Context) (Config, error) {
 		return Config{}, wrapConfigError(configPath, err)
 	}
 	return config, nil
+}
+
+func inheritedWorktreeConfigPath(context Context) string {
+	if context.RepositoryKind != "git-worktree" || context.RepositoryRoot == "" {
+		return ""
+	}
+
+	gitDir, err := resolveGitDir(context.RepositoryRoot)
+	if err != nil {
+		return ""
+	}
+	commonDir := gitDir
+	commonPath := filepath.Join(gitDir, "commondir")
+	if content, err := os.ReadFile(commonPath); err == nil {
+		value := trimString(string(content))
+		if value != "" {
+			if filepath.IsAbs(value) {
+				commonDir = filepath.Clean(value)
+			} else {
+				commonDir = filepath.Clean(filepath.Join(gitDir, value))
+			}
+		}
+	}
+
+	if filepath.Base(commonDir) != ".git" {
+		return ""
+	}
+	mainCheckout := filepath.Dir(commonDir)
+	if filepath.Clean(mainCheckout) == filepath.Clean(context.RepositoryRoot) {
+		return ""
+	}
+
+	configPath := filepath.Join(mainCheckout, "anton.yaml")
+	if _, err := os.Stat(configPath); err == nil {
+		return configPath
+	}
+	return ""
 }
 
 func defaultConfig() Config {
@@ -99,6 +146,9 @@ func wrapConfigError(path string, err error) error {
 }
 
 func (config Config) Source() string {
+	if config.Loaded && config.Inherited {
+		return "inherited main-checkout anton.yaml"
+	}
 	if config.Loaded {
 		return "repo-local anton.yaml"
 	}

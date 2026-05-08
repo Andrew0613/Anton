@@ -1,0 +1,25 @@
+version: 1
+entrypoint:
+  path: AGENTS.md
+tasks:
+  root: .anton/tasks
+threads:
+  default_project_strategy: repo-root
+  workspace_roots:
+    - .anton/workspaces
+gates:
+  - name: unit-tests
+    type: command
+    required_for:
+      - done
+    description: Go package tests.
+    command:
+      argv:
+        - go
+        - test
+        - ./...
+    timeout:
+      seconds: 120
+  - name: reviewer-note
+    type: manual
+    description: Record remaining integration notes before handoff.

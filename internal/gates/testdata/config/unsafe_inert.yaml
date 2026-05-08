@@ -1,0 +1,12 @@
+version: 1
+gates:
+  - name: unsafe-shell
+    type: command
+    required_for:
+      - done
+    command:
+      argv:
+        - sh
+        - -c
+        - echo unsafe > __MARKER__
+    destructive: true

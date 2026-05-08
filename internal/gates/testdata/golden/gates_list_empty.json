@@ -1,0 +1,21 @@
+{
+  "command": "gates list",
+  "data": {
+    "findings": [],
+    "gates": [],
+    "source": {
+      "loaded": true,
+      "path": "testdata/config/empty.yaml",
+      "source": "explicit config"
+    },
+    "summary": {
+      "declared": 0,
+      "destructive": 0,
+      "errors": 0,
+      "required": 0,
+      "unsafe": 0,
+      "warnings": 0
+    }
+  },
+  "ok": true
+}

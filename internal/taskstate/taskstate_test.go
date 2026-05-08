@@ -211,6 +211,43 @@ func TestTaskStateInitJSONContract(t *testing.T) {
 	}
 }
 
+func TestTaskStateInitRequiresExplicitTaskIdentity(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"init", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.OK {
+		t.Fatalf("expected failure payload")
+	}
+	if payload.Error == nil || payload.Error.Code != "task-identity-required" {
+		t.Fatalf("error = %#v", payload.Error)
+	}
+	message := payload.Error.Message
+	for _, expected := range []string{"ANTON_TASK_ID", "task/<id_slug>", ".anton/tasks"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("message %q missing %q", message, expected)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, ".anton")); !os.IsNotExist(err) {
+		t.Fatalf("task-state init should not write files without task identity, stat err=%v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestTaskStateCheckJSONContractAfterInit(t *testing.T) {
 	repoRoot := makeTaskStateTempRepoRoot(t)
 	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+

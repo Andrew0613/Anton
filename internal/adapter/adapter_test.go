@@ -53,7 +53,7 @@ func TestDetectContextRepoSubdirFixture(t *testing.T) {
 }
 
 func TestDetectContextWorktreeFixture(t *testing.T) {
-	path := fixturePath(t, "worktree")
+	path := makeTempLinkedWorktree(t)
 
 	context, err := DetectContext(path, nil)
 	if err != nil {
@@ -115,6 +115,59 @@ func TestLoadConfigDefaultsWhenAntonYAMLIsMissing(t *testing.T) {
 	wantPath := filepath.Join(fixturePath(t, "repo-root"), "anton.yaml")
 	if config.Path != wantPath {
 		t.Fatalf("config path = %q, want %q", config.Path, wantPath)
+	}
+}
+
+func TestLoadConfigInheritsMainCheckoutConfigForLinkedWorktree(t *testing.T) {
+	root := t.TempDir()
+	mainRoot := filepath.Join(root, "main")
+	worktreeRoot := filepath.Join(root, "wt")
+	worktreeGitDir := filepath.Join(mainRoot, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(worktreeGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree gitdir: %v", err)
+	}
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(mainRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir main gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mainRoot, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write main HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeRoot, ".git"), []byte("gitdir: "+worktreeGitDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write worktree .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "HEAD"), []byte("ref: refs/heads/task/demo_task\n"), 0o644); err != nil {
+		t.Fatalf("write worktree HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+	configPath := filepath.Join(mainRoot, "anton.yaml")
+	if err := os.WriteFile(configPath, []byte("version: 1\nentrypoint:\n  path: ops/AGENTS.md\ntasks:\n  root: .anton/state\nthreads:\n  default_project_strategy: none\n"), 0o644); err != nil {
+		t.Fatalf("write anton.yaml: %v", err)
+	}
+
+	context, err := DetectContext(worktreeRoot, nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if !config.Loaded || !config.Inherited {
+		t.Fatalf("config Loaded/Inherited = %v/%v", config.Loaded, config.Inherited)
+	}
+	if config.Path != configPath {
+		t.Fatalf("config path = %q, want %q", config.Path, configPath)
+	}
+	if config.Tasks.Root != ".anton/state" {
+		t.Fatalf("tasks root = %q", config.Tasks.Root)
+	}
+	if config.Source() != "inherited main-checkout anton.yaml" {
+		t.Fatalf("source = %q", config.Source())
 	}
 }
 
@@ -404,4 +457,35 @@ func makeTempRepoRoot(t *testing.T) string {
 		t.Fatalf("write .git/HEAD: %v", err)
 	}
 	return repoRoot
+}
+
+func makeTempLinkedWorktree(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	mainRoot := filepath.Join(root, "main")
+	worktreeRoot := filepath.Join(root, "wt")
+	worktreeGitDir := filepath.Join(mainRoot, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(worktreeGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree gitdir: %v", err)
+	}
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(mainRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir main gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mainRoot, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatalf("write main HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeRoot, ".git"), []byte("gitdir: "+worktreeGitDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write worktree .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "HEAD"), []byte("ref: refs/heads/task/anton-bootstrap\n"), 0o644); err != nil {
+		t.Fatalf("write worktree HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+	return worktreeRoot
 }
