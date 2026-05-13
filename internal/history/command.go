@@ -43,6 +43,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	if len(args) == 0 {
 		return writeUsage(stderr)
 	}
+	if len(args) > 1 && hasHelp(args[1:]) {
+		_, _ = io.WriteString(stdout, usageText())
+		return 0
+	}
 	switch args[0] {
 	case "show":
 		return runShow(args[1:], stdout, stderr, environ)
@@ -167,13 +171,20 @@ func parseOptions(args []string) (commandOptions, error) {
 				return opts, fmt.Errorf("--sessions-root requires a value")
 			}
 			opts.SessionRoot = filepath.Clean(args[index])
-		case "--help", "-h":
-			return opts, fmt.Errorf("help is available as `anton history help`")
 		default:
 			return opts, fmt.Errorf("unexpected argument %q", arg)
 		}
 	}
 	return opts, nil
+}
+
+func hasHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeUsage(stderr io.Writer) int {

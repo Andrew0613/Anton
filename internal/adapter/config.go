@@ -23,7 +23,11 @@ type EntrypointConfig struct {
 }
 
 type TasksConfig struct {
-	Root string `yaml:"root"`
+	Root         string `yaml:"root"`
+	Layout       string `yaml:"layout"`
+	TopicLayer   bool   `yaml:"topic_layer"`
+	StatusSchema string `yaml:"status_schema"`
+	CardSync     bool   `yaml:"card_sync"`
 }
 
 type ThreadsConfig struct {
@@ -161,6 +165,16 @@ func validateConfig(config Config) error {
 	if trimString(config.Tasks.Root) == "" {
 		return fmt.Errorf("anton config tasks.root must not be empty")
 	}
+	switch normalizedTaskLayout(config.Tasks) {
+	case "anton", "topic-layer":
+	default:
+		return fmt.Errorf("anton config tasks.layout must be one of: anton, topic-layer")
+	}
+	switch normalizedStatusSchema(config.Tasks) {
+	case "anton", "physedit-v1":
+	default:
+		return fmt.Errorf("anton config tasks.status_schema must be one of: anton, physedit-v1")
+	}
 	switch config.Threads.DefaultProjectStrategy {
 	case "repo-root", "none":
 	default:
@@ -177,6 +191,25 @@ func validateConfig(config Config) error {
 		}
 	}
 	return nil
+}
+
+func normalizedTaskLayout(tasks TasksConfig) string {
+	if tasks.TopicLayer {
+		return "topic-layer"
+	}
+	layout := trimString(tasks.Layout)
+	if layout == "" {
+		return "anton"
+	}
+	return layout
+}
+
+func normalizedStatusSchema(tasks TasksConfig) string {
+	schema := trimString(tasks.StatusSchema)
+	if schema == "" {
+		return "anton"
+	}
+	return schema
 }
 
 func wrapConfigError(path string, err error) error {

@@ -1,0 +1,40 @@
+version: 1
+custom_top: keep-me
+task:
+  id: demo_topic_task
+  topic: Tooling
+  title: Demo Topic Task
+  lifecycle: active
+  phase: planning
+  owner: codex
+  last_updated: "2026-05-13"
+  custom_task_field: keep-task
+execution:
+  worktree: <REPO_ROOT>
+  branch: main
+  cwd: <REPO_ROOT>
+  scope_paths:
+    - project_progress/Tooling/tasks/active/demo_topic_task
+  batch_rjob: false
+environment:
+  machine_type: local
+  host: devbox
+  tmux_session: ""
+  tmux_window: ""
+  proxy: unknown
+  conda_env: ""
+  python: python3
+  notes: initial note
+services: []
+state:
+  done: []
+  in_progress: []
+  blockers: []
+  next_actions:
+    - continue
+  needs_user: []
+freshness:
+  checked_at: "2026-05-13T00:00:00Z"
+  current_lane: investigation
+  canonical_truth: old truth
+  last_human_confirmed_state: old human state

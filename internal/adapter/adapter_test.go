@@ -158,6 +158,34 @@ func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
 	}
 }
 
+func TestLoadConfigTreatsTopicLayerAsLayoutAliasOnly(t *testing.T) {
+	repoRoot := makeTempRepoRoot(t)
+	configPath := filepath.Join(repoRoot, "anton.yaml")
+	content := "" +
+		"version: 1\n" +
+		"entrypoint:\n  path: AGENTS.md\n" +
+		"tasks:\n  root: project_progress\n  topic_layer: true\n" +
+		"threads:\n  default_project_strategy: repo-root\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write anton.yaml: %v", err)
+	}
+
+	context, err := DetectContext(repoRoot, nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if normalizedTaskLayout(config.Tasks) != "topic-layer" {
+		t.Fatalf("layout = %q", normalizedTaskLayout(config.Tasks))
+	}
+	if normalizedStatusSchema(config.Tasks) != "anton" {
+		t.Fatalf("status schema = %q, want anton", normalizedStatusSchema(config.Tasks))
+	}
+}
+
 func TestLoadConfigInheritsMainCheckoutConfigForLinkedWorktree(t *testing.T) {
 	root := t.TempDir()
 	mainRoot := filepath.Join(root, "main")
@@ -491,6 +519,64 @@ func TestTaskBundleUsesCurrentCanonicalBundleWhenAlreadyInsideTaskDirectory(t *t
 	}
 	if bundle.Root != taskDir {
 		t.Fatalf("bundle root = %q, want %q", bundle.Root, taskDir)
+	}
+}
+
+func TestResolveTaskIdentityUsesTopicLayerBundleWhenConfigured(t *testing.T) {
+	repoRoot := t.TempDir()
+	taskDir := filepath.Join(repoRoot, "project_progress", "PAWBench", "_legacy_picaworld", "tasks", "active", "0001_demo")
+	context := Context{
+		WorkingDirectory: taskDir,
+		RepositoryRoot:   repoRoot,
+	}
+	config := Config{
+		Version: 1,
+		Tasks: TasksConfig{
+			Root:         "project_progress",
+			Layout:       "topic-layer",
+			StatusSchema: "physedit-v1",
+		},
+	}
+
+	identity := ResolveTaskIdentity(context, config, nil)
+
+	if identity.Resolved != "0001_demo" {
+		t.Fatalf("resolved task id = %q", identity.Resolved)
+	}
+	if identity.BundleRoot != taskDir {
+		t.Fatalf("bundle root = %q, want %q", identity.BundleRoot, taskDir)
+	}
+}
+
+func TestTopicLayerTaskBundleFindsNestedTopicBundleFromTaskID(t *testing.T) {
+	repoRoot := t.TempDir()
+	tasksRoot := filepath.Join(repoRoot, "project_progress")
+	bundleRoot := filepath.Join(tasksRoot, "PAWBench", "_legacy_picaworld", "tasks", "active", "0001_demo")
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		t.Fatalf("mkdir bundle: %v", err)
+	}
+	noiseRoot := filepath.Join(tasksRoot, ".worktrees", "PAWBench", "tasks", "active", "0001_demo")
+	if err := os.MkdirAll(noiseRoot, 0o755); err != nil {
+		t.Fatalf("mkdir noise bundle: %v", err)
+	}
+	context := Context{
+		WorkingDirectory: repoRoot,
+		RepositoryRoot:   repoRoot,
+	}
+	config := Config{
+		Version: 1,
+		Tasks: TasksConfig{
+			Root:   "project_progress",
+			Layout: "topic-layer",
+		},
+	}
+
+	bundle, err := Default{Config: config}.TaskBundle(context, []string{"ANTON_TASK_ID=0001_demo"}, time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("TaskBundle returned error: %v", err)
+	}
+	if bundle.Root != bundleRoot {
+		t.Fatalf("bundle root = %q, want %q", bundle.Root, bundleRoot)
 	}
 }
 

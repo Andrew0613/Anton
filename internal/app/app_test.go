@@ -17,7 +17,7 @@ func TestVersionCommand(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if strings.TrimSpace(stdout.String()) != "anton 0.0.2" {
+	if strings.TrimSpace(stdout.String()) != "anton 0.0.3" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -33,7 +33,7 @@ func TestTopLevelVersionFlag(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if strings.TrimSpace(stdout.String()) != "anton 0.0.2" {
+	if strings.TrimSpace(stdout.String()) != "anton 0.0.3" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -49,11 +49,54 @@ func TestVersionCommandJSON(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
-	if !strings.Contains(stdout.String(), `"version": "0.0.2"`) {
+	if !strings.Contains(stdout.String(), `"version": "0.0.3"`) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestGlobalJSONFlagDispatchesToCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"--json", "version"}, &stdout, &stderr, nil)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d", exitCode)
+	}
+	if !strings.Contains(stdout.String(), `"version": "0.0.3"`) {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestSubcommandHelpWorksForPrimarySurfaces(t *testing.T) {
+	cases := [][]string{
+		{"doctor", "--help"},
+		{"context", "--help"},
+		{"preflight", "--help"},
+		{"task-state", "init", "--help"},
+		{"history", "show", "--help"},
+	}
+	for _, args := range cases {
+		args := args
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := Run(args, &stdout, &stderr, nil)
+			if exitCode != 0 {
+				t.Fatalf("exit code = %d stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "Usage:") {
+				t.Fatalf("stdout missing usage: %q", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q", stderr.String())
+			}
+		})
 	}
 }
 

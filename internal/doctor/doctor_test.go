@@ -118,6 +118,43 @@ func TestDoctorExplainIncludesRemediation(t *testing.T) {
 	}
 }
 
+func TestCheckGoToolchainReportsGoModMismatch(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeDoctorFile(t, filepath.Join(repoRoot, "go.mod"), "module example.test/anton\n\ngo 1.22.0\n")
+	binDir := filepath.Join(repoRoot, "bin")
+	writeDoctorFile(t, filepath.Join(binDir, "go"), "#!/bin/sh\nprintf 'go version go1.18.1 linux/amd64\\n'\n")
+	if err := os.Chmod(filepath.Join(binDir, "go"), 0o755); err != nil {
+		t.Fatalf("chmod fake go: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	result := checkGoToolchain(repoRoot)
+
+	if result.Status != statusDegraded {
+		t.Fatalf("status = %q, want %q", result.Status, statusDegraded)
+	}
+	if !strings.Contains(result.Detail, "go.mod requires go 1.22") {
+		t.Fatalf("detail = %q", result.Detail)
+	}
+}
+
+func TestCheckGoToolchainAcceptsMatchingGoMod(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeDoctorFile(t, filepath.Join(repoRoot, "go.mod"), "module example.test/anton\n\ngo 1.22.0\n")
+	binDir := filepath.Join(repoRoot, "bin")
+	writeDoctorFile(t, filepath.Join(binDir, "go"), "#!/bin/sh\nprintf 'go version go1.22.0 linux/amd64\\n'\n")
+	if err := os.Chmod(filepath.Join(binDir, "go"), 0o755); err != nil {
+		t.Fatalf("chmod fake go: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	result := checkGoToolchain(repoRoot)
+
+	if result.Status != statusOK {
+		t.Fatalf("status = %q, want %q: %+v", result.Status, statusOK, result)
+	}
+}
+
 func TestDoctorJSONContextReceiptAcrossWorkspaceKinds(t *testing.T) {
 	cases := []struct {
 		name              string

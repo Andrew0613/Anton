@@ -11,7 +11,10 @@ import (
 	"github.com/Andrew0613/Anton/internal/adapter"
 )
 
-type options struct{ JSON bool }
+type options struct {
+	JSON   bool
+	Target string
+}
 
 type project struct {
 	Name string `json:"name"`
@@ -51,6 +54,7 @@ type commandData struct {
 	Roots            []rootStatus `json:"roots"`
 	Findings         []finding    `json:"findings"`
 	Summary          summary      `json:"summary"`
+	Refs             *RefsReport  `json:"refs,omitempty"`
 }
 
 type errorPayload struct {
@@ -74,6 +78,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return run(args[1:], "workspace inspect", stdout, stderr, environ)
 	case "check":
 		return run(args[1:], "workspace check", stdout, stderr, environ)
+	case "refs":
+		return runRefs(args[1:], stdout, stderr, environ)
 	case "prepare":
 		opts, err := parseOptions(args[1:])
 		if err != nil {
@@ -87,6 +93,36 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		_, _ = fmt.Fprintf(stderr, "unknown workspace command: %s\n\n%s", args[0], usageText())
 		return 2
 	}
+}
+
+func runRefs(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	opts, err := parseOptions(args)
+	if err != nil {
+		return writeError("workspace refs", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+	}
+	report, err := BuildRefsReport(environ, opts.Target)
+	if err != nil {
+		return writeError("workspace refs", "workspace-refs-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+	data := commandData{
+		Adapter:          report.Adapter,
+		WorkingDirectory: report.WorkingDirectory,
+		RepositoryRoot:   report.RepositoryRoot,
+		ConfigPath:       report.ConfigPath,
+		ConfigSource:     report.ConfigSource,
+		Findings:         refsFindings(report.Findings),
+		Summary: summary{
+			Status:       report.Summary.Status,
+			WarningCount: report.Summary.Warnings,
+			ErrorCount:   report.Summary.Blockers,
+		},
+		Refs: &report,
+	}
+	exitCode := 0
+	if report.Summary.Blockers > 0 {
+		exitCode = 1
+	}
+	return writeResponse("workspace refs", data, opts.JSON, stdout, exitCode)
 }
 
 func run(args []string, command string, stdout io.Writer, stderr io.Writer, environ []string) int {
@@ -243,12 +279,18 @@ func pathWithinRoot(root string, candidate string) bool {
 
 func parseOptions(args []string) (options, error) {
 	opts := options{}
-	for _, arg := range args {
-		switch arg {
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
 		case "--json":
 			opts.JSON = true
+		case "--target":
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --target")
+			}
+			opts.Target = args[index]
 		default:
-			return opts, fmt.Errorf("unexpected argument: %s", arg)
+			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}
 	}
 	return opts, nil
@@ -263,6 +305,7 @@ func usageText() string {
 	return `Usage:
   anton workspace inspect [--json]
   anton workspace check [--json]
+  anton workspace refs --target PATH [--json]
 `
 }
 
@@ -275,7 +318,23 @@ func writeResponse(command string, data commandData, asJSON bool, stdout io.Writ
 		return exitCode
 	}
 	_, _ = fmt.Fprintf(stdout, "Anton %s\nStatus: %s\nRoots: %d\n", command, data.Summary.Status, data.Summary.RootCount)
+	if data.Refs != nil {
+		_, _ = fmt.Fprintf(stdout, "Target: %s\nReferences: %d\nRecommendation: %s\n", data.Refs.Target.Relative, len(data.Refs.ReferenceHits), data.Refs.Summary.Recommendation)
+	}
 	return exitCode
+}
+
+func refsFindings(refFindings []RefFinding) []finding {
+	findings := make([]finding, 0, len(refFindings))
+	for _, item := range refFindings {
+		findings = append(findings, finding{
+			Level:   item.Level,
+			Code:    item.Code,
+			Path:    item.Path,
+			Message: item.Message,
+		})
+	}
+	return findings
 }
 
 func writeError(command string, code string, message string, asJSON bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

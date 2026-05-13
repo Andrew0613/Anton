@@ -25,12 +25,12 @@ func TestParseValidGateDeclarations(t *testing.T) {
 	}
 }
 
-func TestCheckMissingRequiredCommandFails(t *testing.T) {
+func TestCheckMissingRequiredCommandWarns(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	exitCode := Run([]string{"check", "--json", "--config", "testdata/config/missing_required.yaml"}, &stdout, &stderr, nil)
-	if exitCode != 1 {
+	if exitCode != 0 {
 		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
 	}
 	assertGoldenJSON(t, stdout.Bytes(), "gates_check_missing_required.json")
@@ -116,6 +116,28 @@ func TestUsageErrorJSONContract(t *testing.T) {
 		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
 	}
 	assertGoldenJSON(t, stdout.Bytes(), "gates_usage_error.json")
+}
+
+func TestRunRemainsNotApproved(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"run", "--json", "--config", "testdata/config/success.yaml"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	payload := struct {
+		Error *errorPayload `json:"error"`
+	}{}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if payload.Error == nil || payload.Error.Code != "not-approved" {
+		t.Fatalf("error = %+v", payload.Error)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
 }
 
 func assertGoldenJSON(t *testing.T, actual []byte, name string) {

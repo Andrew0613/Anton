@@ -41,7 +41,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		if err != nil {
 			return writeError("gates run", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 		}
-		return writeError("gates run", "usage", "gates run is not available; command execution requires a separate security plan", opts.JSON, stdout, stderr, 2)
+		return writeError("gates run", "not-approved", "gates run is not available; command execution requires a separate security plan", opts.JSON, stdout, stderr, 2)
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usageText())
 		return 0

@@ -1,5 +1,5 @@
 {
-  "ok": true,
+  "ok": false,
   "command": "doctor",
   "data": {
     "adapter": "canonical",
