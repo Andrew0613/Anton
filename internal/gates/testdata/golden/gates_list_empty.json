@@ -9,6 +9,7 @@
       "source": "explicit config"
     },
     "summary": {
+      "advisory": 0,
       "declared": 0,
       "destructive": 0,
       "errors": 0,

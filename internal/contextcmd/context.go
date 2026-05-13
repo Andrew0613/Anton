@@ -32,6 +32,11 @@ type response struct {
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	if hasHelp(args) {
+		_, _ = io.WriteString(stdout, usageText())
+		return 0
+	}
+
 	opts, err := parseOptions(args)
 	if err != nil {
 		return writeError("context", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
@@ -43,7 +48,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	}
 
 	output := response{
-		OK:      contractData.Summary.BlockedCount == 0,
+		OK:      contractData.Summary.Status == "ok",
 		Command: "context",
 		Data:    &payload{Contract: contractData},
 	}
@@ -62,6 +67,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	return 1
 }
 
+func usageText() string {
+	return `Usage:
+  anton context [--json] [--explain]
+
+Emits the canonical Anton ContractV1 receipt for the current workspace.
+`
+}
+
 func parseOptions(args []string) (options, error) {
 	opts := options{}
 	for _, arg := range args {
@@ -75,6 +88,15 @@ func parseOptions(args []string) (options, error) {
 		}
 	}
 	return opts, nil
+}
+
+func hasHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 func renderHuman(stdout io.Writer, output response, explain bool) {

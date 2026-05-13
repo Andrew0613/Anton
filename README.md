@@ -1,16 +1,30 @@
 # Anton
 
-Reusable harness CLI for agentic repository workflows.
+Anton is a small CLI for keeping agentic repository work grounded in one
+machine-readable contract.
+
+It helps a repo answer the questions that usually get scattered across
+`AGENTS.md`, task notes, shell state, and past conversation history:
+
+- What is the canonical entrypoint for agents?
+- Where should task state live?
+- Is this workspace safe to build, test, or hand off?
+- Which task is active?
+- Which local evidence should be preserved for the next agent?
+
+Anton is intentionally boring infrastructure. It does not run agents, schedule
+jobs, deploy code, or encode project-specific policy. Repos adapt to Anton with
+`anton.yaml`; Anton keeps the contract stable.
 
 ## Status
 
-`Anton v0.0.2` is the current release. The source tree now includes vNext
-surfaces queued for the next release.
+Current release: `v0.0.3`
 
-The current surface is:
+The released command families are:
 
 - `doctor`
 - `context`
+- `preflight`
 - `task-state`
 - `handoff`
 - `threads`
@@ -25,7 +39,7 @@ The current surface is:
 
 ## Install
 
-Build locally:
+Build from a local checkout:
 
 ```bash
 go build -o ./bin/anton ./cmd/anton
@@ -38,10 +52,10 @@ mkdir -p ~/.local/bin
 go build -o ~/.local/bin/anton ./cmd/anton
 ```
 
-After the GitHub tag exists, install from source with:
+After the GitHub tag exists, install from source:
 
 ```bash
-go install github.com/Andrew0613/Anton/cmd/anton@v0.0.2
+go install github.com/Andrew0613/Anton/cmd/anton@v0.0.3
 ```
 
 Check the installed version:
@@ -50,61 +64,11 @@ Check the installed version:
 anton version
 ```
 
-## Why This Repo Exists
+Anton currently expects the Go version declared by `go.mod`.
 
-Recent research across `euresis`, local/remote `PhysEdit`, workspace-level agent entrypoints, and `codex-threads-insights` showed recurring problems:
+## Quick Start
 
-- entrypoint drift across `AGENTS.md`, `CLAUDE.md`, README blocks, and workflow docs
-- task-state conventions that are only partially enforced
-- runtime harness behavior that diverges from documented repo workflow
-- local vs remote environment differences that break otherwise-valid commands
-- repeated context overload and weak closure signals in recent sessions
-
-Anton exists to turn those recurring harness problems into a reusable product surface.
-
-## Core Positioning
-
-Anton owns:
-
-- harness doctor checks
-- canonical task-state lifecycle
-- repo-local harness contracts
-- thin evidence-first threads integration
-
-Anton does not own:
-
-- orchestration daemons
-- job queues
-- PR/deploy automation
-- repo-specific thread-history policy
-
-Anton's current `threads` surface can wrap `codex-threads`, but vNext history is
-planned as a native Anton capability for both local Codex archives and
-repo-local working memory, so users do not need to install a separate
-`codex-threads` binary for core history workflows.
-
-## Canonical Repo Contract
-
-Repos should adapt to Anton through a repo-local `anton.yaml`, not by expecting
-Anton to grow repo-specific runtime logic.
-
-The contract is intentionally bounded. Anton currently supports only:
-
-- `version`
-- `entrypoint.path`
-- `tasks.root`
-- `threads.default_project_strategy`
-- `threads.workspace_roots`
-
-Unknown fields are rejected so contract drift is explicit.
-
-Canonical defaults:
-
-- entrypoint: `AGENTS.md`
-- task bundles: `.anton/tasks/active/<id_slug>/`
-- optional thread workspaces: `.anton/workspaces/<project>/...`
-
-Example `anton.yaml`:
+Create `anton.yaml` in your repo root:
 
 ```yaml
 version: 1
@@ -118,9 +82,65 @@ threads:
     - .anton/workspaces
 ```
 
-Config source is always explicit in command output:
+Inspect the repo contract:
 
-- `repo-local anton.yaml` when the file is present and valid
+```bash
+anton context --json
+```
+
+Run start-work checks:
+
+```bash
+anton preflight --profile implementation --json
+```
+
+Run broader health checks:
+
+```bash
+anton doctor --json
+```
+
+Initialize or validate task state:
+
+```bash
+ANTON_TASK_ID=example anton task-state init --json
+anton task-state check --json
+```
+
+Build a handoff receipt:
+
+```bash
+anton handoff build --json
+```
+
+## Configuration
+
+Anton reads one repo-local config file: `anton.yaml`.
+
+Supported fields:
+
+- `version`
+- `entrypoint.path`
+- `tasks.root`
+- `tasks.layout`
+- `tasks.status_schema`
+- `tasks.card_sync`
+- `threads.default_project_strategy`
+- `threads.workspace_roots`
+
+Unknown fields are rejected. This keeps contract drift explicit.
+
+Default behavior:
+
+- entrypoint: `AGENTS.md`
+- task bundles: `.anton/tasks/active/<id_slug>/`
+- task layout: `anton`
+- status schema: `anton`
+- optional thread workspaces: `.anton/workspaces/<project>/...`
+
+Config source is always shown in command output:
+
+- `repo-local anton.yaml` when a valid file is present
 - `built-in defaults` when `anton.yaml` is missing
 
 Task identity is inferred from:
@@ -129,265 +149,210 @@ Task identity is inferred from:
 - a `task/.../<id_slug>` branch
 - the current bundle path when already inside `.anton/tasks/...`
 
-## Command Surface
+Anton does not invent a task id when identity is missing. Commands that need one
+return a structured `task-identity-required` error.
 
-Current modules:
+## Core Concepts
 
-- `doctor`
-- `context`
-- `task-state`
-- `handoff`
-- `threads`
-- `adopt`
-- `memory`
-- `history`
-- `gates`
-- `entrypoint`
-- `workspace`
-- `migrate`
-- `version`
+### Contract
 
-Released v0 commands:
+`anton context --json` emits the compact `ContractV1` receipt for the current
+workspace.
 
-- `anton doctor`
-- `anton context`
-- `anton task-state init`
-- `anton task-state pulse`
-- `anton task-state check`
-- `anton task-state close`
-- `anton task-state reopen`
-- `anton task-state retarget`
-- `anton task-state import`
-- `anton handoff build`
-- `anton threads doctor`
-- `anton threads recent`
-- `anton threads insights`
-- `anton threads brief`
-- `anton threads recipe`
-- `anton adopt plan`
-- `anton memory status`
-- `anton memory update`
-- `anton history show`
-- `anton history sync`
-- `anton gates list`
-- `anton gates check`
-- `anton entrypoint check`
-- `anton workspace inspect`
-- `anton workspace check`
-- `anton migrate plan`
-- `anton version`
+`anton doctor --json` uses the same contract and adds health checks,
+remediation, and execution-risk findings.
 
-Planned later surfaces:
+Use these commands at the start of agent work, before trusting local state.
 
-- `anton entrypoint sync`
-- `anton task` as a thin alias over `task-state`
-- `anton gates run`
-- `anton workspace prepare`
-- `anton migrate apply`
+### Preflight
 
-`anton context --json` and `anton doctor --json` share the same `ContractV1`
-payload. `context` is the compact first-run projection; `doctor` remains the
-health and remediation surface around that contract.
+`anton preflight --profile investigation --json` is a read-only check for
+research and inspection work.
 
-## Current Shape
+`anton preflight --profile implementation --json` is stricter: missing task
+identity is blocked so coding agents do not begin writes without a task record.
 
-The bootstrap implementation already follows the canonical contract:
+### Task State
 
-- `anton doctor` resolves repo context, config source, entrypoint path, and
-  execution risks
-- `anton task-state` creates and checks canonical bundles under `.anton/tasks`
-- `anton threads` stays thin and defers indexing/search semantics to
-  `codex-threads`
+`anton task-state` owns the canonical task lifecycle.
 
-## Quick Start
+It creates and checks bundles under `.anton/tasks` by default. A bundle contains:
 
-1. Add `anton.yaml` to the repo root.
-2. Run `anton context --json` for the reusable execution contract, or
-   `anton doctor --json` when you also want health checks.
-3. Create or validate a canonical task bundle with `anton task-state init --json`
-   or `anton task-state check --json`.
-4. Use `anton threads doctor --json` before relying on thread reads.
+- `task_plan.md`
+- `findings.md`
+- `progress.md`
+- `status.yaml`
 
-Minimal `anton.yaml`:
+Use `task-state pulse` after meaningful progress. Use `handoff build` before
+passing work to another person or agent.
+
+Repos with topic-layer task bundles can declare them without repo-specific
+Anton code:
 
 ```yaml
-version: 1
-entrypoint:
-  path: AGENTS.md
 tasks:
-  root: .anton/tasks
-threads:
-  default_project_strategy: repo-root
-  workspace_roots:
-    - .anton/workspaces
+  root: project_progress
+  layout: topic-layer
 ```
 
-## CLI Reference
+Non-native status schemas must be declared explicitly, for example
+`status_schema: physedit-v1`. Anton can read compatible summaries through the
+adapter, but lifecycle mutation commands are only enabled for the native Anton
+status schema until a schema-aware mutation contract lands.
 
-`anton doctor`
+### Evidence
 
-- checks writability, repo context, filesystem risk, configured entrypoint, `codex-threads`, and `anton.yaml`
-- emits shared `data.contract` in JSON
-- includes task identity drift checks and repo contract audit findings
-- use `--json` for a stable execution/config receipt
-- use `--explain` for remediation actions
+Anton has two evidence surfaces:
 
-`anton context`
+- `threads`: compatibility wrapper around `codex-threads`
+- `history`: Anton-native local receipts under `.anton/history/receipts.jsonl`
 
-- emits the shared `ContractV1` under `data.contract`
-- use `--json` for machine handoff and `--explain` for prompt-ready text
+`threads` remains useful when `codex-threads` is installed. `history` is the
+native Anton surface for bounded local evidence.
 
-`anton task-state init`
+### Gates
 
-- creates `task_plan.md`, `findings.md`, `progress.md`, and `status.yaml`
-- writes the bundle under `.anton/tasks/active/<id_slug>/` by default
+`gates list` and `gates check` read declarative gate metadata. They do not run
+commands.
 
-`anton task-state check`
+Runnable gates are deliberately out of scope until execution safety and rollback
+semantics are defined.
 
-- validates required files and the current `status.yaml` schema
+## Command Reference
 
-`anton task-state pulse`
+### Contract and Health
 
-- refreshes machine metadata and timestamps in `status.yaml`
-- appends an execution attempt receipt
+```bash
+anton context [--json|--explain]
+anton preflight --profile investigation [--json]
+anton preflight --profile implementation [--json]
+anton doctor [--json|--explain]
+anton entrypoint check [--json]
+```
 
-`anton task-state close`
+Use these to resolve the current repo contract, entrypoint, environment, and
+execution risks.
 
-- moves lifecycle into `blocked|review|partial|done` with closure gates
-- requires stronger closure evidence for `done`
+### Task Lifecycle
 
-`anton task-state reopen`
+```bash
+anton task-state init [--json]
+anton task-state pulse [--json]
+anton task-state check [--schema anton|auto|physedit-v1] [--json]
+anton task-state env [--json]
+anton task-state service add [--json]
+anton task-state freshness [--json]
+anton task-state sync-card [--json]
+anton task-state close [--json]
+anton task-state reopen [--json]
+anton task-state retarget [--json]
+anton task-state import [--json]
+anton handoff build [--source manual|codex|claude] [--session-id ID] [--json]
+anton handoff persist-results --worktree-root PATH --run-dir PATH --dry-run [--json]
+```
 
-- reopens lifecycle to `active` while preserving evidence history
+Use these to create, validate, update, close, reopen, retarget, import, and hand
+off canonical task bundles.
 
-`anton task-state retarget`
+### Evidence and Memory
 
-- renames the active bundle root and updates `stable.task_id`
+```bash
+anton threads doctor [--json]
+anton threads recent [--json]
+anton threads insights [--json]
+anton threads brief [--json]
+anton threads recipe [--json]
+anton history show [--json]
+anton history sync [--json]
+anton memory status [--json]
+anton memory update [--json]
+```
 
-`anton task-state import`
+Use `threads` for `codex-threads` compatibility. Use `history` and `memory` for
+Anton-native repo-local receipts.
 
-- imports external attempt/validation receipts into `status.yaml`
+### Adoption and Maintenance
 
-`anton handoff build`
+```bash
+anton adopt plan [--json]
+anton gates list [--json]
+anton gates check [--json]
+anton workspace inspect [--json]
+anton workspace check [--json]
+anton workspace refs --target PATH [--json]
+anton migrate plan [--json]
+anton migrate readiness --target PATH [--json]
+```
 
-- builds a compact handoff pack from shared contract, task state, and evidence receipts
-- supports human-readable and `--json` outputs
+These commands are read-only or append-only where noted. `migrate plan` is
+currently blocked until the next config schema is locked, and
+`migrate readiness` never moves files.
 
-`anton threads doctor`
+### Version
 
-- verifies the underlying `codex-threads` binary for the compatibility wrapper
-
-`anton threads recent`
-
-- returns recent project-scoped threads when scope can be inferred
-
-`anton threads insights`
-
-- returns project-scoped aggregate thread signals
-
-`anton threads brief`
-
-- returns a thin scoped brief over `codex-threads threads recent`
-
-`anton threads recipe`
-
-- emits a reusable execution checklist over `codex-threads insights`
-
-`anton adopt plan`
-
-- reports read-only harness adoption gaps from the shared contract and declared paths
-- does not create or modify repo files
-
-`anton memory status`
-
-- reads advisory repo-local memory from `.anton/memory/events.jsonl`
-- missing memory is a normal empty state
-
-`anton memory update`
-
-- appends an advisory memory event to `.anton/memory/events.jsonl`
-- memory never overrides `AGENTS.md`, `anton.yaml`, or contract-authoritative fields
-
-`anton history show`
-
-- reads Anton-native evidence receipts from `.anton/history/receipts.jsonl`
-
-`anton history sync`
-
-- appends idempotent native receipts from bounded local Codex archive scans,
-  canonical Anton task bundles, Anton memory logs, and declared work-record roots
-
-`anton gates list`
-
-- lists inert declarative gate metadata
-
-`anton gates check`
-
-- validates gate declaration completeness without executing commands
-
-`anton entrypoint check`
-
-- validates configured entrypoint existence, size budget, and markdown references
-
-`anton workspace inspect`
-
-- reports configured read-only workspace roots and discovered projects
-
-`anton workspace check`
-
-- validates workspace root and project path safety without preparing directories
-
-`anton migrate plan`
-
-- currently returns a blocked response until the v2 config schema is locked
-
-`anton version`
-
-- prints the release version
-- use `--json` for machine-readable output
+```bash
+anton version [--json]
+```
 
 ## Repo-Local Skills
 
-Anton `v0.0.2` includes three thin repo-local skills under `.codex/skills/`:
+Anton includes three thin Codex skills under `.codex/skills/`:
 
 - `harness-audit`
 - `harness-task`
 - `harness-threads`
 
-They are intentionally thin:
+They are wrappers around Anton commands, not separate policy engines.
 
-- `harness-audit` starts from `anton doctor --json`
-- `harness-task` manages canonical task bundles through `anton task-state ...`
-- `harness-threads` wraps current `anton threads ...`; vNext history should use
-  Anton-native archive and project working-memory reading for core workflows
+Use them as examples for downstream repos that want agent-facing workflows over
+the same CLI contract.
 
-If you want to use them outside this repo, copy or symlink these skill folders
-into your shared Codex skills directory.
+## Design Boundaries
 
-## Docs
+Anton owns:
 
-- Research memo: [docs/research/2026-04-16-anton-research-memo.md](docs/research/2026-04-16-anton-research-memo.md)
-- Requirements: [docs/plans/2026-04-16-anton-requirements.md](docs/plans/2026-04-16-anton-requirements.md)
-- Implementation plan: [docs/plans/2026-04-16-anton-implementation-plan.md](docs/plans/2026-04-16-anton-implementation-plan.md)
-- Handoff: [docs/handoffs/2026-04-16-anton-handoff.md](docs/handoffs/2026-04-16-anton-handoff.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- repo contract inspection
+- entrypoint checks
+- task-state lifecycle
+- handoff receipts
+- local evidence receipts
+- read-only workspace and gate checks
 
-## Development Notes
+Anton does not own:
 
-The first implementation pass should stay narrow:
+- agent orchestration
+- job queues
+- deployment automation
+- PR automation
+- repo-specific business logic
 
-- no orchestration daemon
-- no PR/deploy automation
-- no queueing/runtime scheduler
-- no repo-specific runtime adapters
-- no threads-centric product definition beyond native Anton evidence/history
-  receipts, including bounded project working-memory receipts
+Project-specific conventions should live in the repo and be declared through
+config or documented entrypoints.
 
-The right first milestone is a stable CLI that provides:
+## Development
 
-- environment clarity
-- execution-contract clarity
-- durable task state
-- evidence-first history over conversation archives and project work records
+Run tests:
 
-across local repos and remote SSH environments.
+```bash
+go test ./...
+```
+
+Build locally:
+
+```bash
+go build -o /tmp/anton ./cmd/anton
+```
+
+Run a smoke check from this repo:
+
+```bash
+/tmp/anton doctor --json
+```
+
+## Documentation
+
+- [Research memo](docs/research/2026-04-16-anton-research-memo.md)
+- [Requirements](docs/plans/2026-04-16-anton-requirements.md)
+- [Implementation plan](docs/plans/2026-04-16-anton-implementation-plan.md)
+- [Handoff](docs/handoffs/2026-04-16-anton-handoff.md)
+- [Changelog](CHANGELOG.md)

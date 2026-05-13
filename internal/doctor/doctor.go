@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
@@ -110,6 +111,11 @@ type options struct {
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	if hasHelp(args) {
+		_, _ = io.WriteString(stdout, usageText())
+		return 0
+	}
+
 	opts, err := parseOptions(args)
 	if err != nil {
 		return writeError("doctor", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
@@ -121,7 +127,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	}
 
 	output := report{
-		OK:      data.Summary.BlockedCount == 0,
+		OK:      data.Summary.Status == statusOK,
 		Command: "doctor",
 		Data:    &data,
 	}
@@ -141,6 +147,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	return 1
 }
 
+func usageText() string {
+	return `Usage:
+  anton doctor [--json] [--explain]
+
+Runs Anton repository health checks and emits the canonical contract with remediation guidance.
+`
+}
+
 func parseOptions(args []string) (options, error) {
 	opts := options{}
 	for _, arg := range args {
@@ -154,6 +168,15 @@ func parseOptions(args []string) (options, error) {
 		}
 	}
 	return opts, nil
+}
+
+func hasHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 func CollectContract(environ []string) (contract.ContractV1, error) {
@@ -199,7 +222,7 @@ func collect(environ []string) (reportData, error) {
 		checkFilesystem(filesystemType),
 		checkEntrypointFile(entrypointPath),
 		checkCodexThreads(envValues),
-		checkGoToolchain(),
+		checkGoToolchain(goModuleRoot(contextData)),
 		checkTaskIdentity(taskIdentity),
 		checkContractAudit(contractAudit),
 	}
@@ -441,7 +464,7 @@ func checkCodexThreads(envValues map[string]string) check {
 	}
 }
 
-func checkGoToolchain() check {
+func checkGoToolchain(moduleRoot string) check {
 	path, err := exec.LookPath("go")
 	if err != nil {
 		return check{
@@ -462,11 +485,126 @@ func checkGoToolchain() check {
 		}
 	}
 
+	versionText := strings.TrimSpace(string(out))
+	if required, ok := requiredGoVersion(moduleRoot); ok {
+		current, parsed := parseGoVersion(versionText)
+		if !parsed {
+			return check{
+				Name:   "go-toolchain",
+				Status: statusDegraded,
+				Detail: fmt.Sprintf("go exists at %s but version output could not be parsed: %s", path, versionText),
+				Hint:   "verify that the go binary reports a standard go version before running Anton builds/tests",
+			}
+		}
+		if compareGoVersions(current, required) < 0 {
+			return check{
+				Name:   "go-toolchain",
+				Status: statusDegraded,
+				Detail: fmt.Sprintf("%s; go.mod requires go %s", versionText, required.String()),
+				Hint:   "use a Go toolchain matching go.mod before running Anton builds/tests",
+			}
+		}
+	}
+
 	return check{
 		Name:   "go-toolchain",
 		Status: statusOK,
-		Detail: strings.TrimSpace(string(out)),
+		Detail: versionText,
 	}
+}
+
+func goModuleRoot(contextData adapter.Context) string {
+	if strings.TrimSpace(contextData.RepositoryRoot) != "" {
+		return contextData.RepositoryRoot
+	}
+	return contextData.WorkingDirectory
+}
+
+type goVersion struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+func (version goVersion) String() string {
+	if version.Patch > 0 {
+		return fmt.Sprintf("%d.%d.%d", version.Major, version.Minor, version.Patch)
+	}
+	return fmt.Sprintf("%d.%d", version.Major, version.Minor)
+}
+
+func requiredGoVersion(moduleRoot string) (goVersion, bool) {
+	if strings.TrimSpace(moduleRoot) == "" {
+		return goVersion{}, false
+	}
+	content, err := os.ReadFile(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		return goVersion{}, false
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "go ") {
+			return parseGoDirective(strings.TrimSpace(strings.TrimPrefix(line, "go ")))
+		}
+	}
+	return goVersion{}, false
+}
+
+func parseGoVersion(output string) (goVersion, bool) {
+	fields := strings.Fields(output)
+	for _, field := range fields {
+		if strings.HasPrefix(field, "go") && len(field) > 2 && field[2] >= '0' && field[2] <= '9' {
+			return parseGoDirective(strings.TrimPrefix(field, "go"))
+		}
+	}
+	return goVersion{}, false
+}
+
+func parseGoDirective(raw string) (goVersion, bool) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSuffix(raw, ",")
+	if raw == "" {
+		return goVersion{}, false
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) < 2 {
+		return goVersion{}, false
+	}
+	numbers := []int{0, 0, 0}
+	for index := 0; index < len(parts) && index < len(numbers); index++ {
+		value := numericPrefix(parts[index])
+		if value == "" {
+			return goVersion{}, false
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return goVersion{}, false
+		}
+		numbers[index] = parsed
+	}
+	return goVersion{Major: numbers[0], Minor: numbers[1], Patch: numbers[2]}, true
+}
+
+func numericPrefix(value string) string {
+	var builder strings.Builder
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			break
+		}
+		builder.WriteRune(char)
+	}
+	return builder.String()
+}
+
+func compareGoVersions(left goVersion, right goVersion) int {
+	if left.Major != right.Major {
+		return left.Major - right.Major
+	}
+	if left.Minor != right.Minor {
+		return left.Minor - right.Minor
+	}
+	return left.Patch - right.Patch
 }
 
 func checkTaskIdentity(identity adapter.TaskIdentity) check {

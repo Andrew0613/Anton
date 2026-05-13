@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
+	"gopkg.in/yaml.v3"
 )
 
 func TestReadStatusParsesExpectedSchema(t *testing.T) {
@@ -273,6 +274,205 @@ func TestTaskStateCheckJSONContractAfterInit(t *testing.T) {
 
 	replacements := taskStateReplacements(repoRoot)
 	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_check_success.json", replacements)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateTopicLayerCheckResolvesFromEnv(t *testing.T) {
+	repoRoot, _ := makeTopicLayerRepo(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"check", "--schema", "auto", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_topic_task"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected success payload: %+v", payload.Error)
+	}
+	if payload.Data == nil || payload.Data.TaskID != "demo_topic_task" {
+		t.Fatalf("task id = %#v", payload.Data)
+	}
+	expected := filepath.Join(repoRoot, "project_progress", "Tooling", "tasks", "active", "demo_topic_task")
+	if payload.Data.BundleRoot != expected {
+		t.Fatalf("bundle root = %q, want %q", payload.Data.BundleRoot, expected)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateTopicLayerCheckResolvesFromCWDInsideBundle(t *testing.T) {
+	_, bundleRoot := makeTopicLayerRepo(t)
+	inside := filepath.Join(bundleRoot, "notes")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatalf("mkdir inside bundle: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, inside, func() int {
+		return Run([]string{"check", "--schema", "physedit-v1", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"task_id": "demo_topic_task"`) {
+		t.Fatalf("stdout missing topic-layer task id: %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateTopicLayerMutationsPreserveFieldsAndSyncCard(t *testing.T) {
+	repoRoot, bundleRoot := makeTopicLayerRepo(t)
+	env := []string{"ANTON_TASK_ID=demo_topic_task"}
+
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		commands := [][]string{
+			{"env", "--json", "--machine-type", "rjob", "--proxy", "on", "--cwd", filepath.Join(repoRoot, "work")},
+			{"service", "add", "--json", "--name", "viewer", "--kind", "gradio", "--status", "up", "--reopen-hint", "run viewer"},
+			{"freshness", "--json", "--canonical-truth", "status.yaml plus handoff", "--checked-at", "2026-05-13T12:34:56Z", "--current-lane", "implementation", "--last-human-confirmed-state", "unit test state", "--source-file", "progress.md"},
+			{"sync-card", "--json"},
+		}
+		for _, command := range commands {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if code := Run(command, &stdout, &stderr, env); code != 0 {
+				t.Fatalf("%v exit code = %d, want 0\nstdout=%s\nstderr=%s", command, code, stdout.String(), stderr.String())
+			}
+		}
+		return 0
+	})
+	if exitCode != 0 {
+		t.Fatalf("unexpected wrapper exit code %d", exitCode)
+	}
+
+	payload := readTaskStateYAMLMap(t, filepath.Join(bundleRoot, "status.yaml"))
+	if payload["custom_top"] != "keep-me" {
+		t.Fatalf("custom_top not preserved: %#v", payload["custom_top"])
+	}
+	task := mustMap(t, payload["task"])
+	if task["custom_task_field"] != "keep-task" {
+		t.Fatalf("custom task field not preserved: %#v", task["custom_task_field"])
+	}
+	environment := mustMap(t, payload["environment"])
+	if environment["machine_type"] != "rjob" || environment["proxy"] != "on" {
+		t.Fatalf("environment not updated: %#v", environment)
+	}
+	execution := mustMap(t, payload["execution"])
+	if execution["cwd"] != filepath.Join(repoRoot, "work") {
+		t.Fatalf("execution.cwd = %#v", execution["cwd"])
+	}
+	services, ok := payload["services"].([]any)
+	if !ok || len(services) != 1 {
+		t.Fatalf("services = %#v", payload["services"])
+	}
+	service := mustMap(t, services[0])
+	if service["name"] != "viewer" || service["reopen_hint"] != "run viewer" {
+		t.Fatalf("service not updated: %#v", service)
+	}
+
+	cardPath := filepath.Join(repoRoot, "project_progress", "Tooling", "tasks", "active", "demo_topic_task.md")
+	card := string(readTaskStateFile(t, cardPath))
+	for _, expected := range []string{"KEEP INTRO PROSE", "KEEP TAIL PROSE", "status.yaml plus handoff", "unit test state", "progress.md"} {
+		if !strings.Contains(card, expected) {
+			t.Fatalf("card missing %q:\n%s", expected, card)
+		}
+	}
+	if strings.Contains(card, "old truth") {
+		t.Fatalf("card still contains old generated freshness block:\n%s", card)
+	}
+}
+
+func TestTaskStateCanonicalLifecycleCommandsBlockConfiguredNonAntonSchema(t *testing.T) {
+	repoRoot, _ := makeTopicLayerRepo(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"close", "--json", "--state", "review", "--next-step", "review"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_topic_task"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.Error == nil || payload.Error.Code != "unsupported-status-schema" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCanonicalLifecycleCommandsDoNotRewriteForeignStatusShape(t *testing.T) {
+	repoRoot, bundleRoot := makeTopicLayerRepo(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  topic_layer: true\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	statusPath := filepath.Join(bundleRoot, "status.yaml")
+	before := string(readTaskStateFile(t, statusPath))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"close", "--json", "--state", "review", "--next-step", "review"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_topic_task"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	after := string(readTaskStateFile(t, statusPath))
+	if after != before {
+		t.Fatalf("status.yaml was rewritten\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if !strings.Contains(stdout.String(), "not an Anton native status schema") {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateCheckReportsUnknownConfiguredStatusSchema(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: made-up\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"check", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_topic_task"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.OK || payload.Error == nil || !strings.Contains(payload.Error.Message, "tasks.status_schema") {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
@@ -666,4 +866,64 @@ func writeTaskStateFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func makeTopicLayerRepo(t *testing.T) (string, string) {
+	t.Helper()
+
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: physedit-v1\n  card_sync: true\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	bundleRoot := filepath.Join(repoRoot, "project_progress", "Tooling", "tasks", "active", "demo_topic_task")
+	writeTaskStateFile(t, filepath.Join(bundleRoot, "task_plan.md"), "# Task Plan\n")
+	writeTaskStateFile(t, filepath.Join(bundleRoot, "findings.md"), "# Findings\n")
+	writeTaskStateFile(t, filepath.Join(bundleRoot, "progress.md"), "# Progress\n")
+	status := strings.ReplaceAll(string(readTaskStateFixture(t, "topic-layer", "status.yaml")), "<REPO_ROOT>", filepath.ToSlash(repoRoot))
+	writeTaskStateFile(t, filepath.Join(bundleRoot, "status.yaml"), status)
+	card := strings.ReplaceAll(string(readTaskStateFixture(t, "topic-layer", "card.md")), "<REPO_ROOT>", filepath.ToSlash(repoRoot))
+	writeTaskStateFile(t, filepath.Join(repoRoot, "project_progress", "Tooling", "tasks", "active", "demo_topic_task.md"), card)
+	return repoRoot, bundleRoot
+}
+
+func readTaskStateFixture(t *testing.T, parts ...string) []byte {
+	t.Helper()
+
+	pathParts := append([]string{"testdata"}, parts...)
+	return readTaskStateFile(t, filepath.Join(pathParts...))
+}
+
+func readTaskStateFile(t *testing.T, path string) []byte {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return content
+}
+
+func readTaskStateYAMLMap(t *testing.T, path string) map[string]any {
+	t.Helper()
+
+	var payload map[string]any
+	if err := yaml.Unmarshal(readTaskStateFile(t, path), &payload); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return payload
+}
+
+func mustMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+
+	payload, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %#v", value)
+	}
+	return payload
 }

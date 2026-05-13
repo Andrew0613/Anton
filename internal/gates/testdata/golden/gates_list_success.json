@@ -33,10 +33,14 @@
       "source": "explicit config"
     },
     "summary": {
+      "advisory": 1,
       "declared": 2,
       "destructive": 0,
       "errors": 0,
       "required": 1,
+      "required_for": {
+        "done": 1
+      },
       "unsafe": 0,
       "warnings": 0
     }

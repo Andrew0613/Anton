@@ -41,7 +41,12 @@ func ResolveTaskIdentity(context Context, config Config, environ []string) TaskI
 		})
 	}
 
-	bundleRoot := currentTaskBundleRoot(context.WorkingDirectory, tasksRoot)
+	bundleRoot := ""
+	if definition.taskLayout() == "topic-layer" {
+		bundleRoot = currentTopicLayerTaskBundleRoot(context.WorkingDirectory, tasksRoot)
+	} else {
+		bundleRoot = currentAntonTaskBundleRoot(context.WorkingDirectory, tasksRoot)
+	}
 	if strings.TrimSpace(bundleRoot) != "" {
 		signals = append(signals, TaskIdentitySignal{
 			Source: "bundle",

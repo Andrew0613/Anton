@@ -7,14 +7,16 @@
         "field": "command.argv[2]",
         "gate": "unsafe-shell",
         "level": "warning",
-        "message": "command metadata contains shell-like content; it is reported but never executed by this surface"
+        "message": "command metadata contains shell-like content; it is reported but never executed by this surface",
+        "remediation": "prefer argv-style metadata without shell operators before runnable gates are considered"
       },
       {
         "code": "destructive-gate-inert",
         "field": "destructive",
         "gate": "unsafe-shell",
         "level": "warning",
-        "message": "destructive gate metadata is visible only; anton gates does not execute commands"
+        "message": "destructive gate metadata is visible only; anton gates does not execute commands",
+        "remediation": "keep destructive gates advisory until a separate execution safety plan lands"
       }
     ],
     "gates": [
@@ -40,10 +42,14 @@
       "source": "explicit config"
     },
     "summary": {
+      "advisory": 0,
       "declared": 1,
       "destructive": 1,
       "errors": 0,
       "required": 1,
+      "required_for": {
+        "done": 1
+      },
       "unsafe": 1,
       "warnings": 2
     }
