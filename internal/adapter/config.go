@@ -7,15 +7,17 @@ import (
 )
 
 type Config struct {
-	Version    int              `yaml:"version"`
-	Entrypoint EntrypointConfig `yaml:"entrypoint"`
-	Tasks      TasksConfig      `yaml:"tasks"`
-	Threads    ThreadsConfig    `yaml:"threads"`
-	Gates      []GateConfig     `yaml:"gates"`
-	Extensions ExtensionsConfig `yaml:"extensions"`
-	Path       string           `yaml:"-"`
-	Loaded     bool             `yaml:"-"`
-	Inherited  bool             `yaml:"-"`
+	Version      int                          `yaml:"version"`
+	Entrypoint   EntrypointConfig             `yaml:"entrypoint"`
+	Tasks        TasksConfig                  `yaml:"tasks"`
+	Run          RunConfig                    `yaml:"run"`
+	Threads      ThreadsConfig                `yaml:"threads"`
+	Gates        []GateConfig                 `yaml:"gates"`
+	GateProfiles map[string]GateProfileConfig `yaml:"gate_profiles"`
+	Extensions   ExtensionsConfig             `yaml:"extensions"`
+	Path         string                       `yaml:"-"`
+	Loaded       bool                         `yaml:"-"`
+	Inherited    bool                         `yaml:"-"`
 }
 
 type EntrypointConfig struct {
@@ -28,6 +30,13 @@ type TasksConfig struct {
 	TopicLayer   bool   `yaml:"topic_layer"`
 	StatusSchema string `yaml:"status_schema"`
 	CardSync     bool   `yaml:"card_sync"`
+	PlanningMode string `yaml:"planning_mode"`
+}
+
+type RunConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	Manifest    string `yaml:"manifest"`
+	ReceiptsDir string `yaml:"receipts_dir"`
 }
 
 type ThreadsConfig struct {
@@ -52,6 +61,10 @@ type GateCommandConfig struct {
 
 type GateTimeoutConfig struct {
 	Seconds int `yaml:"seconds"`
+}
+
+type GateProfileConfig struct {
+	Required []string `yaml:"required"`
 }
 
 type ExtensionsConfig struct {
@@ -145,13 +158,19 @@ func defaultConfig() Config {
 			Path: "AGENTS.md",
 		},
 		Tasks: TasksConfig{
-			Root: ".anton/tasks",
+			Root:         ".anton/tasks",
+			PlanningMode: "planning_files",
+		},
+		Run: RunConfig{
+			Manifest:    "run.json",
+			ReceiptsDir: "receipts",
 		},
 		Threads: ThreadsConfig{
 			DefaultProjectStrategy: "repo-root",
 			WorkspaceRoots:         []string{},
 		},
-		Gates: []GateConfig{},
+		Gates:        []GateConfig{},
+		GateProfiles: map[string]GateProfileConfig{},
 	}
 }
 
@@ -175,6 +194,17 @@ func validateConfig(config Config) error {
 	default:
 		return fmt.Errorf("anton config tasks.status_schema must be one of: anton, physedit-v1")
 	}
+	switch normalizedPlanningMode(config.Tasks) {
+	case "planning_files", "run_manifest", "hybrid":
+	default:
+		return fmt.Errorf("anton config tasks.planning_mode must be one of: planning_files, run_manifest, hybrid")
+	}
+	if trimString(config.Run.Manifest) == "" {
+		return fmt.Errorf("anton config run.manifest must not be empty")
+	}
+	if trimString(config.Run.ReceiptsDir) == "" {
+		return fmt.Errorf("anton config run.receipts_dir must not be empty")
+	}
 	switch config.Threads.DefaultProjectStrategy {
 	case "repo-root", "none":
 	default:
@@ -188,6 +218,16 @@ func validateConfig(config Config) error {
 	for index, root := range config.Extensions.History.WorkRecordRoots {
 		if trimString(root) == "" {
 			return fmt.Errorf("anton config extensions.history.work_record_roots[%d] must not be empty", index)
+		}
+	}
+	for name, profile := range config.GateProfiles {
+		if trimString(name) == "" {
+			return fmt.Errorf("anton config gate_profiles contains an empty profile name")
+		}
+		for index, gate := range profile.Required {
+			if trimString(gate) == "" {
+				return fmt.Errorf("anton config gate_profiles.%s.required[%d] must not be empty", name, index)
+			}
 		}
 	}
 	return nil
@@ -210,6 +250,34 @@ func normalizedStatusSchema(tasks TasksConfig) string {
 		return "anton"
 	}
 	return schema
+}
+
+func normalizedPlanningMode(tasks TasksConfig) string {
+	mode := trimString(tasks.PlanningMode)
+	if mode == "" {
+		return "planning_files"
+	}
+	return mode
+}
+
+func (config Config) PlanningMode() string {
+	return normalizedPlanningMode(config.Tasks)
+}
+
+func (config Config) RunManifestName() string {
+	value := trimString(config.Run.Manifest)
+	if value == "" {
+		return "run.json"
+	}
+	return value
+}
+
+func (config Config) RunReceiptsDir() string {
+	value := trimString(config.Run.ReceiptsDir)
+	if value == "" {
+		return "receipts"
+	}
+	return value
 }
 
 func wrapConfigError(path string, err error) error {

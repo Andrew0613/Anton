@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "command": "run close",
+  "data": {
+    "adapter": "canonical",
+    "working_directory": "<REPO_ROOT>",
+    "config": {
+      "path": "<REPO_ROOT>/anton.yaml",
+      "source": "repo-local anton.yaml",
+      "tasks_root": ".anton/tasks",
+      "planning_mode": "planning_files",
+      "run_manifest": "run.json",
+      "run_receipts_dir": "receipts"
+    },
+    "bundle_root": "<REPO_ROOT>/.anton/tasks/active/demo_task",
+    "manifest_path": "<REPO_ROOT>/.anton/tasks/active/demo_task/run.json",
+    "task_id": "demo_task",
+    "checklist_summary": {
+      "pending": 0,
+      "in_progress": 0,
+      "blocked": 0,
+      "done": 1,
+      "dropped": 0
+    },
+    "manifest": {
+      "schema_version": 1,
+      "task_id": "demo_task",
+      "created_at": "2026-05-20T00:00:00Z",
+      "updated_at": "2026-05-20T00:00:00Z",
+      "mode": "sidecar",
+      "planning_mode": "run_manifest",
+      "checklist": [
+        {
+          "id": "u1",
+          "title": "Add run manifest package",
+          "status": "done",
+          "notes": [
+            "implemented"
+          ]
+        }
+      ],
+      "attempts": [],
+      "audit": [
+        {
+          "kind": "test",
+          "name": "unit",
+          "status": "passed",
+          "summary": "go test ./internal/run",
+          "receipt_path": ".anton/tasks/active/demo_task/receipts/unit.json",
+          "created_at": "2026-05-20T00:00:00Z"
+        }
+      ],
+      "close": {
+        "status": "review",
+        "summary": "ready for integration",
+        "closed_at": "2026-05-20T00:00:00Z",
+        "updated_at": "2026-05-20T00:00:00Z"
+      }
+    }
+  }
+}

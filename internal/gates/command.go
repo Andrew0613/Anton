@@ -14,6 +14,15 @@ type options struct {
 	ConfigPath string
 }
 
+type runOptions struct {
+	JSON       bool
+	ConfigPath string
+	GateName   string
+	Profile    string
+	DryRun     bool
+	AttachRun  bool
+}
+
 type response struct {
 	OK      bool          `json:"ok"`
 	Command string        `json:"command"`
@@ -37,11 +46,11 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	case "check":
 		return runCheck(args[1:], stdout, stderr, environ)
 	case "run":
-		opts, err := parseOptions(args[1:])
+		opts, err := parseRunOptions(args[1:])
 		if err != nil {
 			return writeError("gates run", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 		}
-		return writeError("gates run", "not-approved", "gates run is not available; command execution requires a separate security plan", opts.JSON, stdout, stderr, 2)
+		return runDeclaredGates(opts, stdout, stderr, environ)
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usageText())
 		return 0
@@ -101,6 +110,49 @@ func parseOptions(args []string) (options, error) {
 	return opts, nil
 }
 
+func parseRunOptions(args []string) (runOptions, error) {
+	opts := runOptions{}
+	for _, arg := range args {
+		if arg == "--json" {
+			opts.JSON = true
+			break
+		}
+	}
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+		case "--dry-run":
+			opts.DryRun = true
+		case "--attach-run":
+			opts.AttachRun = true
+		case "--config":
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --config")
+			}
+			opts.ConfigPath = args[index]
+		case "--gate":
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --gate")
+			}
+			opts.GateName = args[index]
+		case "--profile":
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --profile")
+			}
+			opts.Profile = args[index]
+		default:
+			return opts, fmt.Errorf("unexpected argument: %s", args[index])
+		}
+	}
+	if opts.GateName != "" && opts.Profile != "" {
+		return opts, fmt.Errorf("--gate and --profile are mutually exclusive")
+	}
+	return opts, nil
+}
+
 func loadSet(opts options, environ []string) (Set, error) {
 	if opts.ConfigPath != "" {
 		return LoadFile(opts.ConfigPath, "explicit config")
@@ -148,11 +200,23 @@ func setFromAdapterConfig(config adapter.Config) Set {
 			Source: config.Source(),
 			Loaded: config.Loaded,
 		},
-		Gates: normalizeGates(gates),
+		Gates:    normalizeGates(gates),
+		Profiles: profilesFromAdapterConfig(config),
 	}
 	set.Findings = validateGates(set.Gates)
 	set.Summary = summarize(set.Gates, set.Findings)
 	return set
+}
+
+func profilesFromAdapterConfig(config adapter.Config) map[string]Profile {
+	if len(config.GateProfiles) == 0 {
+		return nil
+	}
+	profiles := map[string]Profile{}
+	for name, profile := range config.GateProfiles {
+		profiles[name] = Profile{Required: profile.Required}
+	}
+	return normalizeProfiles(profiles)
 }
 
 func writeUsage(stderr io.Writer) int {
@@ -164,6 +228,7 @@ func usageText() string {
 	return `Usage:
   anton gates list [--json] [--config PATH]
   anton gates check [--json] [--config PATH]
+  anton gates run [--gate NAME|--profile NAME] [--dry-run] [--attach-run] [--json] [--config PATH]
 `
 }
 

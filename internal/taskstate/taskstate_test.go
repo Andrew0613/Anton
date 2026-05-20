@@ -11,8 +11,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
+	runstate "github.com/Andrew0613/Anton/internal/run"
 	"gopkg.in/yaml.v3"
 )
 
@@ -276,6 +278,78 @@ func TestTaskStateCheckJSONContractAfterInit(t *testing.T) {
 	assertTaskStateGoldenJSON(t, stdout.Bytes(), "task_state_check_success.json", replacements)
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskStateRunManifestPlanningModeRequiresRunManifest(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n  planning_mode: run_manifest\n"+
+		"run:\n  enabled: true\n  manifest: run.json\n  receipts_dir: receipts\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+	env := []string{"ANTON_TASK_ID=demo_task"}
+
+	var missingStdout bytes.Buffer
+	var missingStderr bytes.Buffer
+	missingExit := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"check", "--json"}, &missingStdout, &missingStderr, env)
+	})
+	if missingExit != 1 {
+		t.Fatalf("exit code = %d, want 1 while run manifest is missing\nstdout=%s\nstderr=%s", missingExit, missingStdout.String(), missingStderr.String())
+	}
+	if !strings.Contains(missingStdout.String(), "anton run init") {
+		t.Fatalf("missing run manifest guidance not found: %s", missingStdout.String())
+	}
+
+	bundleRoot := filepath.Join(repoRoot, ".anton/state/active/demo_task")
+	writeTaskStateFile(t, filepath.Join(bundleRoot, "run.json"), "{}\n")
+
+	var invalidStdout bytes.Buffer
+	var invalidStderr bytes.Buffer
+	invalidExit := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"check", "--json"}, &invalidStdout, &invalidStderr, env)
+	})
+	if invalidExit != 1 {
+		t.Fatalf("exit code = %d, want 1 while run manifest is invalid\nstdout=%s\nstderr=%s", invalidExit, invalidStdout.String(), invalidStderr.String())
+	}
+	if !strings.Contains(invalidStdout.String(), "run manifest is not valid") {
+		t.Fatalf("invalid run manifest detail not found: %s", invalidStdout.String())
+	}
+
+	manifest, err := runstate.NewManifest("demo_task", time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if err := runstate.NewStore(bundleRoot).Save(manifest); err != nil {
+		t.Fatalf("save manifest: %v", err)
+	}
+
+	var okStdout bytes.Buffer
+	var okStderr bytes.Buffer
+	okExit := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"check", "--json"}, &okStdout, &okStderr, env)
+	})
+	if okExit != 0 {
+		t.Fatalf("exit code = %d, want 0 once run manifest exists\nstdout=%s\nstderr=%s", okExit, okStdout.String(), okStderr.String())
+	}
+	var payload response
+	if err := json.Unmarshal(okStdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, okStdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected success payload: %+v", payload.Error)
+	}
+	for _, file := range payload.Data.Files {
+		if strings.HasSuffix(file.Path, "task_plan.md") || strings.HasSuffix(file.Path, "findings.md") || strings.HasSuffix(file.Path, "progress.md") {
+			t.Fatalf("run_manifest mode should not require planning file triad: %+v", file)
+		}
 	}
 }
 

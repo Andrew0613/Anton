@@ -118,22 +118,40 @@ func TestUsageErrorJSONContract(t *testing.T) {
 	assertGoldenJSON(t, stdout.Bytes(), "gates_usage_error.json")
 }
 
-func TestRunRemainsNotApproved(t *testing.T) {
+func TestRunDryRunSelectsProfile(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "anton.yaml")
+	if err := os.WriteFile(configPath, []byte(""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/tasks\n"+
+		"threads:\n  default_project_strategy: repo-root\n"+
+		"gates:\n"+
+		"  - name: smoke\n"+
+		"    type: command\n"+
+		"    command:\n"+
+		"      argv: [echo, ok]\n"+
+		"gate_profiles:\n"+
+		"  handoff:\n"+
+		"    required: [smoke]\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := Run([]string{"run", "--json", "--config", "testdata/config/success.yaml"}, &stdout, &stderr, nil)
-	if exitCode != 2 {
+	exitCode := Run([]string{"run", "--json", "--dry-run", "--profile", "handoff", "--config", configPath}, &stdout, &stderr, nil)
+	if exitCode != 0 {
 		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
 	}
-	payload := struct {
-		Error *errorPayload `json:"error"`
-	}{}
+	payload := gateRunResponse{}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v\n%s", err, stdout.String())
 	}
-	if payload.Error == nil || payload.Error.Code != "not-approved" {
-		t.Fatalf("error = %+v", payload.Error)
+	if !payload.OK || payload.Receipt == nil {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Receipt.Summary.Skipped != 1 || payload.Receipt.Results[0].Gate != "smoke" {
+		t.Fatalf("receipt = %+v", payload.Receipt)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())

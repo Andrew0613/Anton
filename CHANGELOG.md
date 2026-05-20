@@ -2,13 +2,39 @@
 
 ## Unreleased
 
-- add `preflight` investigation and implementation profiles for read-only
-  start-work checks
-- add topic-layer task-state support through `tasks.layout`,
-  `tasks.status_schema`, and related lifecycle metadata commands
-- add source-aware handoff packets plus dry-run result persistence planning
-- add read-only `workspace refs` and `migrate readiness` reports for path moves
-- improve declarative gate summaries while keeping `gates run` blocked
+## v0.0.4 - 2026-05-20
+
+### Added
+
+- add passive `anton run` manifests for task-scoped checklist, audit, receipt,
+  and close state
+- add safe `anton gates run` execution for declared argv command gates with
+  dry-run, profiles, timeouts, output caps, destructive-gate blocking, and
+  optional run-manifest receipts
+- add adopter harness inventory reports for classifying local harness surfaces
+  during migration
+- add run-manifest-only and heavy-harness fixtures plus a dogfood script for
+  the consolidation workflow
+- add migration guides for run manifests, safe gate execution, and heavy-harness
+  consolidation
+
+### Changed
+
+- allow `task-state` to use `run_manifest` planning mode without requiring the
+  planning-file triad
+- include run manifest summaries and recent audit items in handoff output
+- extend config, doctor, context, and contract projections with planning mode,
+  run manifest, receipts directory, and gate profile fields
+- clarify README and CONTEXT around passive run state, planning-file
+  projections, and the no-daemon/no-backend boundary
+
+### Fixed
+
+- validate run manifests before they satisfy `task-state check`
+- reject mismatched run manifest task IDs for active task operations
+- keep attached gate receipts inside the task bundle and reject symlink receipt
+  paths
+- update gates warnings now that bounded command execution exists
 
 ## v0.0.3 - 2026-05-08
 

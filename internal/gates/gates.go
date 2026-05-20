@@ -78,19 +78,26 @@ type Summary struct {
 }
 
 type Set struct {
-	Source   Source    `json:"source"`
-	Gates    []Gate    `json:"gates"`
-	Findings []Finding `json:"findings"`
-	Summary  Summary   `json:"summary"`
+	Source   Source             `json:"source"`
+	Gates    []Gate             `json:"gates"`
+	Profiles map[string]Profile `json:"profiles,omitempty"`
+	Findings []Finding          `json:"findings"`
+	Summary  Summary            `json:"summary"`
+}
+
+type Profile struct {
+	Required []string `json:"required,omitempty" yaml:"required"`
 }
 
 type rawConfig struct {
-	Version    int            `yaml:"version"`
-	Entrypoint map[string]any `yaml:"entrypoint"`
-	Tasks      map[string]any `yaml:"tasks"`
-	Threads    map[string]any `yaml:"threads"`
-	Gates      []Gate         `yaml:"gates"`
-	Extensions map[string]any `yaml:"extensions"`
+	Version      int                `yaml:"version"`
+	Entrypoint   map[string]any     `yaml:"entrypoint"`
+	Tasks        map[string]any     `yaml:"tasks"`
+	Run          map[string]any     `yaml:"run"`
+	Threads      map[string]any     `yaml:"threads"`
+	Gates        []Gate             `yaml:"gates"`
+	GateProfiles map[string]Profile `yaml:"gate_profiles"`
+	Extensions   map[string]any     `yaml:"extensions"`
 }
 
 func Parse(data []byte, source Source) (Set, error) {
@@ -115,8 +122,9 @@ func Parse(data []byte, source Source) (Set, error) {
 	}
 
 	set := Set{
-		Source: source,
-		Gates:  normalizeGates(config.Gates),
+		Source:   source,
+		Gates:    normalizeGates(config.Gates),
+		Profiles: normalizeProfiles(config.GateProfiles),
 	}
 	set.Findings = validateGates(set.Gates)
 	set.Summary = summarize(set.Gates, set.Findings)
@@ -172,6 +180,25 @@ func normalizeGates(gates []Gate) []Gate {
 	return normalized
 }
 
+func normalizeProfiles(profiles map[string]Profile) map[string]Profile {
+	if len(profiles) == 0 {
+		return nil
+	}
+	normalized := map[string]Profile{}
+	for name, profile := range profiles {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		profile.Required = normalizeStringList(profile.Required)
+		normalized[name] = profile
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
 func validateGates(gates []Gate) []Finding {
 	findings := []Finding{}
 	seen := map[string]bool{}
@@ -202,7 +229,7 @@ func validateGates(gates []Gate) []Finding {
 		}
 
 		if gate.Type == "command" && isRequired(gate) && (gate.Command == nil || len(gate.Command.Argv) == 0) {
-			findings = append(findings, warningFinding(label, "command.argv", "missing-command-metadata", "command metadata is optional and inert until runnable gates are approved", "declare command.argv for auditability, or keep the gate manual/external"))
+			findings = append(findings, warningFinding(label, "command.argv", "missing-command-metadata", "command gates need command.argv before they can be executed by gates run", "declare command.argv, or keep the gate manual/external"))
 		}
 
 		if gate.Command != nil {
@@ -215,7 +242,7 @@ func validateGates(gates []Gate) []Finding {
 					continue
 				}
 				if looksShellLike(arg) {
-					findings = append(findings, warningFinding(label, fmt.Sprintf("command.argv[%d]", argIndex), "unsafe-command-content", "command metadata contains shell-like content; it is reported but never executed by this surface", "prefer argv-style metadata without shell operators before runnable gates are considered"))
+					findings = append(findings, warningFinding(label, fmt.Sprintf("command.argv[%d]", argIndex), "unsafe-command-content", "command metadata contains shell-like content; gates run blocks shell execution", "prefer argv-style metadata without shell operators"))
 				}
 			}
 		}
@@ -225,7 +252,7 @@ func validateGates(gates []Gate) []Finding {
 		}
 
 		if gate.Destructive {
-			findings = append(findings, warningFinding(label, "destructive", "destructive-gate-inert", "destructive gate metadata is visible only; anton gates does not execute commands", "keep destructive gates advisory until a separate execution safety plan lands"))
+			findings = append(findings, warningFinding(label, "destructive", "destructive-gate-blocked", "destructive gate metadata is visible but gates run blocks it by default", "keep destructive gates advisory until a separate execution opt-in policy lands"))
 		}
 	}
 

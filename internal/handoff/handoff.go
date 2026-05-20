@@ -12,6 +12,7 @@ import (
 	"github.com/Andrew0613/Anton/internal/adapter"
 	"github.com/Andrew0613/Anton/internal/contract"
 	"github.com/Andrew0613/Anton/internal/doctor"
+	runstate "github.com/Andrew0613/Anton/internal/run"
 )
 
 type options struct {
@@ -43,6 +44,7 @@ type pack struct {
 	TaskStatus             taskStatusSummary   `json:"task_status"`
 	Git                    gitSummary          `json:"git"`
 	ValidationReceipts     []handoffEvidence   `json:"validation_receipts,omitempty"`
+	Run                    *runSummary         `json:"run,omitempty"`
 	BlockerDetails         []string            `json:"blockers,omitempty"`
 	UserDecisions          []string            `json:"user_decisions,omitempty"`
 	NextCommands           []string            `json:"next_commands,omitempty"`
@@ -57,6 +59,15 @@ type response struct {
 	Command string        `json:"command"`
 	Data    any           `json:"data,omitempty"`
 	Error   *errorPayload `json:"error,omitempty"`
+}
+
+type runSummary struct {
+	ManifestPath     string                    `json:"manifest_path"`
+	CloseStatus      string                    `json:"close_status"`
+	CloseSummary     string                    `json:"close_summary,omitempty"`
+	ChecklistSummary runstate.ChecklistSummary `json:"checklist_summary"`
+	AuditCount       int                       `json:"audit_count"`
+	LatestAudit      []runstate.AuditItem      `json:"latest_audit,omitempty"`
 }
 
 type errorPayload struct {
@@ -114,9 +125,11 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 
 	taskPlanPath := filepath.Join(bundle.Root, "task_plan.md")
 	planContent, err := os.ReadFile(taskPlanPath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return writeError("handoff build", "handoff-build-failed", fmt.Sprintf("read %s: %v", taskPlanPath, err), opts.JSON, stdout, stderr, 1)
 	}
+	planText := string(planContent)
+	runData, runWarnings := collectRunSummary(bundle.Root, resolved.Config)
 
 	statusDetails, err := readTaskStatusSummary(statusPath, snapshot)
 	if err != nil {
@@ -131,9 +144,10 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	warnings := handoffWarnings(snapshot, contractData)
 	warnings = append(warnings, git.Warnings...)
 	warnings = append(warnings, sourceWarnings...)
+	warnings = append(warnings, runWarnings...)
 
 	output := pack{
-		Objective:              extractObjective(string(planContent)),
+		Objective:              extractObjective(planText),
 		Scope:                  resolved.Context.ScopePaths,
 		TaskID:                 snapshot.TaskID,
 		Lifecycle:              snapshot.Lifecycle,
@@ -148,8 +162,9 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 		TaskStatus:             statusDetails,
 		Git:                    git,
 		ValidationReceipts:     statusDetails.ValidationReceipts,
+		Run:                    runData,
 		BlockerDetails:         statusDetails.Blockers,
-		UserDecisions:          extractUserDecisions(statusDetails, snippets, string(planContent)),
+		UserDecisions:          extractUserDecisions(statusDetails, snippets, planText),
 		NextCommands:           nextCommands(snapshot),
 		Source:                 source,
 		SourceSnippets:         snippets,
@@ -180,7 +195,33 @@ func runBuild(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 		_, _ = fmt.Fprintf(stdout, "Next commands: %s\n", strings.Join(output.NextCommands, " && "))
 	}
 	_, _ = fmt.Fprintf(stdout, "Receipts: attempts=%d validations=%d\n", output.AttemptReceiptCount, output.ValidationReceiptCount)
+	if output.Run != nil {
+		_, _ = fmt.Fprintf(stdout, "Run: close=%s audit=%d checklist_done=%d\n", output.Run.CloseStatus, output.Run.AuditCount, output.Run.ChecklistSummary.Done)
+	}
 	return 0
+}
+
+func collectRunSummary(bundleRoot string, config adapter.Config) (*runSummary, []string) {
+	store := runstate.NewStoreWithNames(bundleRoot, config.RunManifestName(), config.RunReceiptsDir())
+	if !store.Exists() {
+		return nil, nil
+	}
+	manifest, err := store.LoadForTask(filepath.Base(bundleRoot))
+	if err != nil {
+		return nil, []string{fmt.Sprintf("run manifest exists but could not be read: %v", err)}
+	}
+	latest := manifest.Audit
+	if len(latest) > 5 {
+		latest = latest[len(latest)-5:]
+	}
+	return &runSummary{
+		ManifestPath:     store.Path(),
+		CloseStatus:      manifest.Close.Status,
+		CloseSummary:     manifest.Close.Summary,
+		ChecklistSummary: manifest.ChecklistSummary(),
+		AuditCount:       len(manifest.Audit),
+		LatestAudit:      append([]runstate.AuditItem{}, latest...),
+	}, nil
 }
 
 func runPersistResults(args []string, stdout io.Writer, stderr io.Writer) int {

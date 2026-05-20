@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -136,6 +137,48 @@ func TestPlanHumanOutput(t *testing.T) {
 	}
 }
 
+func TestHarnessInventoryJSONClassifiesHeavyHarness(t *testing.T) {
+	repoRoot := makeAdoptTempRepoRoot(t)
+	writeHeavyHarnessFixture(t, repoRoot)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"harness-inventory", "--json"}, &stdout, &stderr, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + repoRoot})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr=%s", exitCode, stderr.String())
+	}
+
+	assertInventoryGoldenJSON(t, stdout.Bytes(), "adopt_harness_inventory_heavy.json", adoptReplacements(repoRoot))
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestHarnessInventoryMarkdownOutput(t *testing.T) {
+	repoRoot := makeAdoptTempRepoRoot(t)
+	writeHeavyHarnessFixture(t, repoRoot)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"harness-inventory", "--format", "markdown"}, &stdout, &stderr, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + repoRoot})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr=%s", exitCode, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"# Anton Harness Inventory", "## move_to_anton", "## keep_project_local", "## delete_or_deprecate", "## manual_review"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("markdown output missing %q:\n%s", want, output)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func assertAdoptGoldenJSON(t *testing.T, payload []byte, goldenPath string, replacements map[string]string) {
 	t.Helper()
 
@@ -166,6 +209,46 @@ func normalizeAdoptJSON(t *testing.T, payload []byte, replacements map[string]st
 	}
 
 	var parsed response
+	if err := json.Unmarshal([]byte(normalized), &parsed); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, normalized)
+	}
+	canonical, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+	return fmt.Sprintf("%s\n", canonical)
+}
+
+func assertInventoryGoldenJSON(t *testing.T, payload []byte, goldenPath string, replacements map[string]string) {
+	t.Helper()
+
+	actual := normalizeInventoryJSON(t, payload, replacements)
+	expectedBytes, err := os.ReadFile(resolveAdoptGoldenPath(t, goldenPath))
+	if err != nil {
+		t.Fatalf("read golden %s: %v", goldenPath, err)
+	}
+	expected := normalizeInventoryJSON(t, expectedBytes, nil)
+	if actual != expected {
+		t.Fatalf("json contract mismatch for %s\n--- actual ---\n%s\n--- expected ---\n%s", goldenPath, actual, expected)
+	}
+}
+
+func normalizeInventoryJSON(t *testing.T, payload []byte, replacements map[string]string) string {
+	t.Helper()
+
+	normalized := string(payload)
+	keys := make([]string, 0, len(replacements))
+	for old := range replacements {
+		keys = append(keys, old)
+	}
+	sort.Slice(keys, func(i int, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, old := range keys {
+		normalized = strings.ReplaceAll(normalized, old, replacements[old])
+	}
+
+	var parsed inventoryResponse
 	if err := json.Unmarshal([]byte(normalized), &parsed); err != nil {
 		t.Fatalf("decode payload: %v\n%s", err, normalized)
 	}
@@ -221,6 +304,46 @@ func makeAdoptTempRepoRoot(t *testing.T) string {
 	}
 	writeAdoptFile(t, filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
 	return repoRoot
+}
+
+func writeHeavyHarnessFixture(t *testing.T, repoRoot string) {
+	t.Helper()
+
+	fixtureRoot := resolveAdoptFixturePath(t, "heavy-harness")
+	if err := filepath.WalkDir(fixtureRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(fixtureRoot, path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		writeAdoptFile(t, filepath.Join(repoRoot, rel), string(content))
+		return nil
+	}); err != nil {
+		t.Fatalf("copy heavy harness fixture: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".anton", "tasks", "active"), 0o755); err != nil {
+		t.Fatalf("mkdir active tasks: %v", err)
+	}
+}
+
+func resolveAdoptFixturePath(t *testing.T, name string) string {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("resolve caller path for fixture %s", name)
+	}
+	return filepath.Join(filepath.Dir(thisFile), "testdata", "fixtures", name)
 }
 
 func writeAdoptFile(t *testing.T, path string, content string) {

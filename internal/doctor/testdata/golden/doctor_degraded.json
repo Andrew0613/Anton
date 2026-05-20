@@ -25,6 +25,10 @@
       "source": "built-in defaults",
       "entrypoint_path": "<REPO_ROOT>/AGENTS.md",
       "tasks_root": ".anton/tasks",
+      "tasks_planning_mode": "planning_files",
+      "run_enabled": false,
+      "run_manifest": "run.json",
+      "run_receipts_dir": "receipts",
       "threads_default_project_strategy": "repo-root"
     },
     "task_identity": {
@@ -55,6 +59,10 @@
         "source": "built-in defaults",
         "entrypoint_path": "<REPO_ROOT>/AGENTS.md",
         "tasks_root": ".anton/tasks",
+      "tasks_planning_mode": "planning_files",
+      "run_enabled": false,
+      "run_manifest": "run.json",
+      "run_receipts_dir": "receipts",
         "threads_default_project_strategy": "repo-root"
       },
       "task_identity": {

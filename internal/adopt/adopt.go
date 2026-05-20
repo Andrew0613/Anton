@@ -81,6 +81,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 	switch args[0] {
 	case "plan":
 		return runPlan(args[1:], stdout, stderr, environ)
+	case "harness-inventory":
+		return runHarnessInventory(args[1:], stdout, stderr, environ)
 	case "help", "-h", "--help":
 		_, _ = io.WriteString(stdout, usageText())
 		return 0
@@ -471,9 +473,11 @@ func writeUsage(stderr io.Writer) int {
 func usageText() string {
 	return `Usage:
   anton adopt plan [--json|--human]
+  anton adopt harness-inventory [--json|--format markdown]
 
 Commands:
-  plan    report read-only Anton adoption gaps for this repo
+  plan               report read-only Anton adoption gaps for this repo
+  harness-inventory  classify local harness surfaces for Anton adoption
 `
 }
 

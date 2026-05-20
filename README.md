@@ -16,16 +16,23 @@ Anton is intentionally boring infrastructure. It does not run agents, schedule
 jobs, deploy code, or encode project-specific policy. Repos adapt to Anton with
 `anton.yaml`; Anton keeps the contract stable.
 
+The current harness consolidation work is adding passive run-manifest support:
+Anton will record checklist state, attempts, audit notes, and validation
+receipts around externally driven agent work. It is inspired by agent-runner
+manifest, lifecycle, and audit ideas, but Anton is not becoming an agent runner
+backend, daemon, scheduler, queue, or UI.
+
 ## Status
 
-Current release: `v0.0.3`
+Current release: `v0.0.4`
 
-The released command families are:
+The current checkout command families are:
 
 - `doctor`
 - `context`
 - `preflight`
 - `task-state`
+- `run`
 - `handoff`
 - `threads`
 - `adopt`
@@ -36,6 +43,10 @@ The released command families are:
 - `workspace`
 - `migrate`
 - `version`
+
+Run manifests and the safe gates runner are passive sidecar surfaces. They
+record externally driven work; they do not launch coding agents or introduce
+backend scope.
 
 ## Install
 
@@ -55,7 +66,7 @@ go build -o ~/.local/bin/anton ./cmd/anton
 After the GitHub tag exists, install from source:
 
 ```bash
-go install github.com/Andrew0613/Anton/cmd/anton@v0.0.3
+go install github.com/Andrew0613/Anton/cmd/anton@v0.0.4
 ```
 
 Check the installed version:
@@ -125,6 +136,12 @@ Supported fields:
 - `tasks.layout`
 - `tasks.status_schema`
 - `tasks.card_sync`
+- `tasks.planning_mode`
+- `run.enabled`
+- `run.manifest`
+- `run.receipts_dir`
+- `gates`
+- `gate_profiles`
 - `threads.default_project_strategy`
 - `threads.workspace_roots`
 
@@ -136,6 +153,9 @@ Default behavior:
 - task bundles: `.anton/tasks/active/<id_slug>/`
 - task layout: `anton`
 - status schema: `anton`
+- planning mode: `planning_files`
+- run manifest: `run.json`
+- run receipts: `receipts`
 - optional thread workspaces: `.anton/workspaces/<project>/...`
 
 Config source is always shown in command output:
@@ -186,6 +206,23 @@ It creates and checks bundles under `.anton/tasks` by default. A bundle contains
 Use `task-state pulse` after meaningful progress. Use `handoff build` before
 passing work to another person or agent.
 
+The `task_plan.md`, `findings.md`, and `progress.md` files are compatibility and
+projection artifacts for repos that still use planning-file workflows. New
+adopters can use Anton-native task state plus the run manifest for
+machine-checkable work state.
+
+### Run Manifest
+
+`anton run` owns passive execution state for the active task: checklist items,
+audit notes, validation receipts, attempts, and close state. It requires an
+existing task bundle and never creates or mutates task lifecycle state.
+
+```bash
+ANTON_TASK_ID=example anton task-state init --json
+ANTON_TASK_ID=example anton run init --json
+ANTON_TASK_ID=example anton run task add --id u1 --title "Run tests" --json
+```
+
 Repos with topic-layer task bundles can declare them without repo-specific
 Anton code:
 
@@ -212,11 +249,10 @@ native Anton surface for bounded local evidence.
 
 ### Gates
 
-`gates list` and `gates check` read declarative gate metadata. They do not run
-commands.
-
-Runnable gates are deliberately out of scope until execution safety and rollback
-semantics are defined.
+`gates list` and `gates check` read declarative gate metadata. `gates run` has a
+bounded execution subset for declared argv-style command gates. It enforces a
+repo-contained cwd, timeouts, output caps, destructive-gate blocking by default,
+and optional `--attach-run` receipts that append to the run manifest.
 
 ## Command Reference
 
@@ -254,6 +290,20 @@ anton handoff persist-results --worktree-root PATH --run-dir PATH --dry-run [--j
 Use these to create, validate, update, close, reopen, retarget, import, and hand
 off canonical task bundles.
 
+### Run State
+
+```bash
+anton run init [--json]
+anton run status [--json]
+anton run task list [--json]
+anton run task add --id ID --title TITLE [--json]
+anton run task set --id ID --status pending|in_progress|blocked|done|dropped [--note NOTE] [--json]
+anton run audit add --kind KIND --name NAME --status STATUS [--summary SUMMARY] [--receipt-path PATH] [--json]
+anton run close --status open|review|done|blocked|canceled [--summary SUMMARY] [--json]
+```
+
+Use these to manage passive run manifests under the active task bundle.
+
 ### Evidence and Memory
 
 ```bash
@@ -275,8 +325,10 @@ Anton-native repo-local receipts.
 
 ```bash
 anton adopt plan [--json]
+anton adopt harness-inventory [--json|--format markdown]
 anton gates list [--json]
 anton gates check [--json]
+anton gates run [--gate NAME|--profile NAME] [--dry-run] [--attach-run] [--json]
 anton workspace inspect [--json]
 anton workspace check [--json]
 anton workspace refs --target PATH [--json]
@@ -309,19 +361,24 @@ the same CLI contract.
 
 ## Design Boundaries
 
-Anton owns:
+Anton owns these passive CLI-sidecar surfaces:
 
 - repo contract inspection
 - entrypoint checks
 - task-state lifecycle
+- passive run manifests and audit receipts
 - handoff receipts
 - local evidence receipts
-- read-only workspace and gate checks
+- read-only workspace checks
+- declared gate metadata and bounded gate receipts
 
 Anton does not own:
 
 - agent orchestration
+- coding-agent backends
+- daemons or schedulers
 - job queues
+- product UI
 - deployment automation
 - PR automation
 - repo-specific business logic
@@ -334,7 +391,7 @@ config or documented entrypoints.
 Run tests:
 
 ```bash
-go test ./...
+TMPDIR=/var/tmp ~/.local/share/go1.22.0/bin/go test ./...
 ```
 
 Build locally:
@@ -349,10 +406,19 @@ Run a smoke check from this repo:
 /tmp/anton doctor --json
 ```
 
+Run a harness-consolidation dogfood loop:
+
+```bash
+scripts/dogfood_harness_consolidation.sh
+```
+
 ## Documentation
 
 - [Research memo](docs/research/2026-04-16-anton-research-memo.md)
 - [Requirements](docs/plans/2026-04-16-anton-requirements.md)
 - [Implementation plan](docs/plans/2026-04-16-anton-implementation-plan.md)
+- [Harness consolidation guide](docs/guides/harness-consolidation.md)
+- [Run manifest guide](docs/guides/run-manifest.md)
+- [Gates runner guide](docs/guides/gates-runner.md)
 - [Handoff](docs/handoffs/2026-04-16-anton-handoff.md)
 - [Changelog](CHANGELOG.md)
