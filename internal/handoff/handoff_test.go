@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	runstate "github.com/Andrew0613/Anton/internal/run"
 )
 
 func TestHandoffBuildJSON(t *testing.T) {
@@ -170,6 +173,70 @@ func TestHandoffBuildIncludesDirtyGitFiles(t *testing.T) {
 	}
 	if !containsString(payload.Data.Git.Untracked, "untracked.txt") {
 		t.Fatalf("untracked = %#v", payload.Data.Git.Untracked)
+	}
+}
+
+func TestHandoffBuildIncludesRunManifestWithoutPlanningFiles(t *testing.T) {
+	repoRoot := makeHandoffTempRepoRoot(t)
+	writeHandoffFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/state\n  planning_mode: run_manifest\n"+
+		"run:\n  enabled: true\n  manifest: run.json\n  receipts_dir: receipts\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeHandoffFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+	bundleRoot := filepath.Join(repoRoot, ".anton", "state", "active", "demo_task")
+	writeHandoffFile(t, filepath.Join(bundleRoot, "status.yaml"), ""+
+		"version: 1\n"+
+		"stable:\n  task_id: demo_task\n  created_at: 2026-05-20T00:00:00Z\n"+
+		"state:\n  lifecycle: review\n  updated_at: 2026-05-20T00:10:00Z\n"+
+		"machine:\n  host: test\n  execution_target: local\n  working_directory: "+repoRoot+"\n  workspace_kind: git-repo-root\n"+
+		"evidence:\n  attempts: []\n  validations: []\n"+
+		"closure:\n  finish_state: review\n  next_step: continue from run manifest\n  blockers: []\n  expected_deliverables: []\n",
+	)
+	manifest, err := runstate.NewManifest("demo_task", time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if err := manifest.AddChecklistItem("u1", "Wire handoff", time.Date(2026, 5, 20, 0, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("add checklist: %v", err)
+	}
+	if err := manifest.SetChecklistItem("u1", "done", "", time.Date(2026, 5, 20, 0, 2, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("set checklist: %v", err)
+	}
+	if err := manifest.AddAuditItem(runstate.AuditItem{Kind: "gate", Name: "handoff", Status: "passed", Summary: "dry run", ReceiptPath: ".anton/state/active/demo_task/receipts/gates/handoff.json"}, time.Date(2026, 5, 20, 0, 3, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("add audit: %v", err)
+	}
+	if err := runstate.NewStore(bundleRoot).Save(manifest); err != nil {
+		t.Fatalf("save manifest: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withHandoffWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"build", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_task"})
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Run *runSummary `json:"run"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Data.Run == nil {
+		t.Fatalf("expected run summary: %s", stdout.String())
+	}
+	if payload.Data.Run.ChecklistSummary.Done != 1 || payload.Data.Run.AuditCount != 1 {
+		t.Fatalf("run summary = %+v", payload.Data.Run)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 

@@ -1,0 +1,102 @@
+{
+  "ok": true,
+  "command": "adopt harness-inventory",
+  "data": {
+    "schema_version": 1,
+    "repository_root": "<REPO_ROOT>",
+    "working_directory": "<REPO_ROOT>",
+    "config_source": "repo-local anton.yaml",
+    "findings": [
+      {
+        "id": "local-task-state-script",
+        "classification": "move_to_anton",
+        "category": "task_state",
+        "path": ".codex/hooks.json",
+        "title": "Local task-state lifecycle script",
+        "evidence": "{\"pre_tool_use\": \"scripts/task_status.py\", \"note\": \"hook side effects require review\"}",
+        "confidence": "high",
+        "recommendation": "move reusable lifecycle checks and mutations behind Anton task-state or run commands"
+      },
+      {
+        "id": "local-gate-wrapper",
+        "classification": "move_to_anton",
+        "category": "gates",
+        "path": "scripts/check_workflow_contracts.py",
+        "title": "Local validation or gate wrapper",
+        "evidence": "# check_workflow_contracts.py emits a validation receipt for local gates",
+        "confidence": "medium",
+        "recommendation": "model generic validation wrappers as declarative Anton gates and receipts"
+      },
+      {
+        "id": "local-task-state-script",
+        "classification": "move_to_anton",
+        "category": "task_state",
+        "path": "scripts/task_status.py",
+        "title": "Local task-state lifecycle script",
+        "evidence": "STATUS = 'status.yaml'",
+        "confidence": "high",
+        "recommendation": "move reusable lifecycle checks and mutations behind Anton task-state or run commands"
+      },
+      {
+        "id": "project-research-policy",
+        "classification": "keep_project_local",
+        "category": "project_policy",
+        "path": "docs/research_policy.md",
+        "title": "Project-specific research or infrastructure policy",
+        "evidence": "GPU cluster dataset benchmark experiments stay project-specific.",
+        "confidence": "medium",
+        "recommendation": "keep project-specific research, data, and infrastructure policy in the adopter repo"
+      },
+      {
+        "id": "mandatory-planning-files",
+        "classification": "delete_or_deprecate",
+        "category": "planning_requirements",
+        "path": "AGENTS.md",
+        "title": "Mandatory planning-file workflow",
+        "evidence": "Agents must use planning-with-files and keep task_plan.md, findings.md, and progress.md current.",
+        "confidence": "high",
+        "recommendation": "replace mandatory planning-file language with Anton-native task or run state, keeping files only as optional projections"
+      },
+      {
+        "id": "legacy-harness-surface",
+        "classification": "delete_or_deprecate",
+        "category": "legacy_harness",
+        "path": "docs/legacy_harness.md",
+        "title": "Legacy or deprecated harness surface",
+        "evidence": "This legacy harness surface is deprecated and should be removed after migration.",
+        "confidence": "medium",
+        "recommendation": "delete or deprecate this surface after Anton provides equivalent coverage"
+      },
+      {
+        "id": "hook-or-agent-config",
+        "classification": "manual_review",
+        "category": "hooks",
+        "path": ".codex/hooks.json",
+        "title": "Hook or agent configuration",
+        "evidence": "{\"pre_tool_use\": \"scripts/task_status.py\", \"note\": \"hook side effects require review\"}",
+        "confidence": "medium",
+        "recommendation": "review side effects manually before deciding whether Anton should own the behavior"
+      },
+      {
+        "id": "ambiguous-check-script",
+        "classification": "manual_review",
+        "category": "ambiguous_checker",
+        "path": "scripts/check_workflow_contracts.py",
+        "title": "Ambiguous local checker",
+        "evidence": "path matched inventory rule",
+        "confidence": "low",
+        "recommendation": "inspect whether this checker is generic harness behavior or project-specific policy"
+      }
+    ],
+    "summary": {
+      "finding_count": 8,
+      "inspected_path_count": 6,
+      "classifications": {
+        "delete_or_deprecate": 2,
+        "keep_project_local": 1,
+        "manual_review": 2,
+        "move_to_anton": 3
+      }
+    }
+  }
+}

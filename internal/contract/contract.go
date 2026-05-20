@@ -45,6 +45,10 @@ type Config struct {
 	Source                        string   `json:"source"`
 	EntrypointPath                string   `json:"entrypoint_path"`
 	TasksRoot                     string   `json:"tasks_root"`
+	TasksPlanningMode             string   `json:"tasks_planning_mode"`
+	RunEnabled                    bool     `json:"run_enabled"`
+	RunManifest                   string   `json:"run_manifest"`
+	RunReceiptsDir                string   `json:"run_receipts_dir"`
 	ThreadsDefaultProjectStrategy string   `json:"threads_default_project_strategy"`
 	ThreadsWorkspaceRoots         []string `json:"threads_workspace_roots,omitempty"`
 }
@@ -107,6 +111,10 @@ func Build(input Input) ContractV1 {
 			Source:                        input.Config.Source(),
 			EntrypointPath:                input.EntrypointPath,
 			TasksRoot:                     input.Config.Tasks.Root,
+			TasksPlanningMode:             input.Config.PlanningMode(),
+			RunEnabled:                    input.Config.Run.Enabled,
+			RunManifest:                   input.Config.RunManifestName(),
+			RunReceiptsDir:                input.Config.RunReceiptsDir(),
 			ThreadsDefaultProjectStrategy: input.Config.Threads.DefaultProjectStrategy,
 			ThreadsWorkspaceRoots:         input.Config.Threads.WorkspaceRoots,
 		},

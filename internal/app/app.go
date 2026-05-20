@@ -15,6 +15,7 @@ import (
 	"github.com/Andrew0613/Anton/internal/memory"
 	"github.com/Andrew0613/Anton/internal/migrate"
 	"github.com/Andrew0613/Anton/internal/preflight"
+	"github.com/Andrew0613/Anton/internal/run"
 	"github.com/Andrew0613/Anton/internal/taskstate"
 	"github.com/Andrew0613/Anton/internal/threads"
 	"github.com/Andrew0613/Anton/internal/versioncmd"
@@ -35,6 +36,7 @@ Usage:
   anton context [--json|--explain]
   anton preflight --profile <investigation|implementation> [--json]
   anton task-state <init|pulse|check|env|service|freshness|sync-card|close|reopen|retarget|import> [--json]
+  anton run <init|status|task|audit|close> [--json]
   anton handoff <build|persist-results> [--json]
   anton threads <doctor|recent|insights|brief|recipe> [--json]
   anton adopt plan [--json]
@@ -68,6 +70,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return preflight.Run(args[1:], stdout, stderr, environ)
 	case "task-state":
 		return taskstate.Run(args[1:], stdout, stderr, environ)
+	case "run":
+		return run.Run(args[1:], stdout, stderr, environ)
 	case "handoff":
 		return handoff.Run(args[1:], stdout, stderr, environ)
 	case "threads":

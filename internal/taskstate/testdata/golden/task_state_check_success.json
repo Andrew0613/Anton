@@ -7,7 +7,10 @@
     "config": {
       "path": "<REPO_ROOT>/anton.yaml",
       "source": "repo-local anton.yaml",
-      "tasks_root": ".anton/state"
+      "tasks_root": ".anton/state",
+      "planning_mode": "planning_files",
+      "run_manifest": "run.json",
+      "run_receipts_dir": "receipts"
     },
     "bundle_root": "<REPO_ROOT>/.anton/state/active/demo_task",
     "status_path": "<REPO_ROOT>/.anton/state/active/demo_task/status.yaml",

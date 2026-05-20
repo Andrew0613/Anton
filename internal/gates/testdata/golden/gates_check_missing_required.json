@@ -7,8 +7,8 @@
         "field": "command.argv",
         "gate": "unit-tests",
         "level": "warning",
-        "message": "command metadata is optional and inert until runnable gates are approved",
-        "remediation": "declare command.argv for auditability, or keep the gate manual/external"
+        "message": "command gates need command.argv before they can be executed by gates run",
+        "remediation": "declare command.argv, or keep the gate manual/external"
       }
     ],
     "gates": [

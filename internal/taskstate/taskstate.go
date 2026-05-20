@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
+	runstate "github.com/Andrew0613/Anton/internal/run"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,9 +44,12 @@ type summary struct {
 }
 
 type configContract struct {
-	Path      string `json:"path"`
-	Source    string `json:"source"`
-	TasksRoot string `json:"tasks_root"`
+	Path           string `json:"path"`
+	Source         string `json:"source"`
+	TasksRoot      string `json:"tasks_root"`
+	PlanningMode   string `json:"planning_mode"`
+	RunManifest    string `json:"run_manifest,omitempty"`
+	RunReceiptsDir string `json:"run_receipts_dir,omitempty"`
 }
 
 type lifecycleContract struct {
@@ -405,6 +409,7 @@ func runCheck(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 		return writeTaskBundleError("task-state check", err, opts.JSON, stdout, stderr)
 	}
 	files := validateBundle(bundle.Root, bundle)
+	files = append(files, validateRunPlanningSurface(bundle.Root, resolved.Config)...)
 	statusPath := bundle.StatusPath()
 
 	taskID := ""
@@ -1372,6 +1377,48 @@ func validateBundle(bundleRoot string, bundle adapter.ResolvedTaskBundle) []file
 	return results
 }
 
+func validateRunPlanningSurface(bundleRoot string, config adapter.Config) []fileResult {
+	if config.PlanningMode() != "run_manifest" {
+		return nil
+	}
+	store := runstate.NewStoreWithNames(bundleRoot, config.RunManifestName(), config.RunReceiptsDir())
+	path := store.Path()
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && !info.IsDir():
+		if _, err := store.LoadForTask(filepath.Base(bundleRoot)); err != nil {
+			return []fileResult{{
+				Path:   path,
+				Status: "invalid",
+				Detail: fmt.Sprintf("run manifest is not valid: %v", err),
+			}}
+		}
+		return []fileResult{{
+			Path:   path,
+			Status: "existing",
+			Detail: "validated run manifest satisfies durable planning surface",
+		}}
+	case err == nil && info.IsDir():
+		return []fileResult{{
+			Path:   path,
+			Status: "invalid",
+			Detail: "expected run manifest file but found a directory",
+		}}
+	case os.IsNotExist(err):
+		return []fileResult{{
+			Path:   path,
+			Status: "missing",
+			Detail: "run `anton run init` to create the run manifest",
+		}}
+	default:
+		return []fileResult{{
+			Path:   path,
+			Status: "invalid",
+			Detail: err.Error(),
+		}}
+	}
+}
+
 func summarize(files []fileResult) summary {
 	result := summary{Status: statusOK}
 	for _, file := range files {
@@ -1492,9 +1539,12 @@ func chooseTaskID(values ...string) string {
 
 func buildConfigContract(config adapter.Config) configContract {
 	return configContract{
-		Path:      config.Path,
-		Source:    config.Source(),
-		TasksRoot: config.Tasks.Root,
+		Path:           config.Path,
+		Source:         config.Source(),
+		TasksRoot:      config.Tasks.Root,
+		PlanningMode:   config.PlanningMode(),
+		RunManifest:    config.RunManifestName(),
+		RunReceiptsDir: config.RunReceiptsDir(),
 	}
 }
 

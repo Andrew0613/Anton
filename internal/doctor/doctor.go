@@ -68,6 +68,10 @@ type configContract struct {
 	Source                        string   `json:"source"`
 	EntrypointPath                string   `json:"entrypoint_path"`
 	TasksRoot                     string   `json:"tasks_root"`
+	TasksPlanningMode             string   `json:"tasks_planning_mode"`
+	RunEnabled                    bool     `json:"run_enabled"`
+	RunManifest                   string   `json:"run_manifest"`
+	RunReceiptsDir                string   `json:"run_receipts_dir"`
 	ThreadsDefaultProjectStrategy string   `json:"threads_default_project_strategy"`
 	ThreadsWorkspaceRoots         []string `json:"threads_workspace_roots,omitempty"`
 }
@@ -258,6 +262,10 @@ func collect(environ []string) (reportData, error) {
 			Source:                        resolved.Config.Source(),
 			EntrypointPath:                entrypointPath,
 			TasksRoot:                     resolved.Config.Tasks.Root,
+			TasksPlanningMode:             resolved.Config.PlanningMode(),
+			RunEnabled:                    resolved.Config.Run.Enabled,
+			RunManifest:                   resolved.Config.RunManifestName(),
+			RunReceiptsDir:                resolved.Config.RunReceiptsDir(),
 			ThreadsDefaultProjectStrategy: resolved.Config.Threads.DefaultProjectStrategy,
 			ThreadsWorkspaceRoots:         resolved.Config.Threads.WorkspaceRoots,
 		},
@@ -752,6 +760,8 @@ func renderHuman(stdout io.Writer, output report, explain bool) {
 	_, _ = fmt.Fprintf(stdout, "  Path: %s\n", data.Config.Path)
 	_, _ = fmt.Fprintf(stdout, "  Entrypoint: %s\n", data.Config.EntrypointPath)
 	_, _ = fmt.Fprintf(stdout, "  Tasks root: %s\n", data.Config.TasksRoot)
+	_, _ = fmt.Fprintf(stdout, "  Planning mode: %s\n", data.Config.TasksPlanningMode)
+	_, _ = fmt.Fprintf(stdout, "  Run manifest: %s (enabled=%t)\n", data.Config.RunManifest, data.Config.RunEnabled)
 	_, _ = fmt.Fprintf(stdout, "  Threads strategy: %s\n", data.Config.ThreadsDefaultProjectStrategy)
 	if len(data.Config.ThreadsWorkspaceRoots) > 0 {
 		_, _ = fmt.Fprintf(stdout, "  Workspace roots: %s\n", strings.Join(data.Config.ThreadsWorkspaceRoots, ", "))

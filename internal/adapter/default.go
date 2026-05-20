@@ -46,7 +46,7 @@ func (definition Default) TaskBundle(context Context, environ []string, now time
 		}
 		return ResolvedTaskBundle{
 			Root:          current,
-			RequiredFiles: defaultTaskFiles(now),
+			RequiredFiles: definition.defaultTaskFiles(now),
 			StatusFile:    "status.yaml",
 		}, nil
 	}
@@ -61,7 +61,7 @@ func (definition Default) TaskBundle(context Context, environ []string, now time
 
 	return ResolvedTaskBundle{
 		Root:          filepath.Join(tasksRoot, "active", taskID),
-		RequiredFiles: defaultTaskFiles(now),
+		RequiredFiles: definition.defaultTaskFiles(now),
 		StatusFile:    "status.yaml",
 	}, nil
 }
@@ -445,7 +445,10 @@ func (definition Default) effectiveConfig() Config {
 	return definition.Config
 }
 
-func defaultTaskFiles(now time.Time) []TaskFile {
+func (definition Default) defaultTaskFiles(now time.Time) []TaskFile {
+	if definition.effectiveConfig().PlanningMode() == "run_manifest" {
+		return []TaskFile{}
+	}
 	return []TaskFile{
 		{
 			Name:     "task_plan.md",
@@ -469,7 +472,7 @@ func (definition Default) topicLayerTaskBundle(context Context, environ []string
 		}
 		return ResolvedTaskBundle{
 			Root:          current,
-			RequiredFiles: defaultTaskFiles(now),
+			RequiredFiles: definition.defaultTaskFiles(now),
 			StatusFile:    "status.yaml",
 		}, nil
 	}
@@ -484,7 +487,7 @@ func (definition Default) topicLayerTaskBundle(context Context, environ []string
 	if existing := findTopicLayerTaskBundle(tasksRoot, taskID); existing != "" {
 		return ResolvedTaskBundle{
 			Root:          existing,
-			RequiredFiles: defaultTaskFiles(now),
+			RequiredFiles: definition.defaultTaskFiles(now),
 			StatusFile:    "status.yaml",
 		}, nil
 	}
@@ -500,7 +503,7 @@ func (definition Default) topicLayerTaskBundle(context Context, environ []string
 
 	return ResolvedTaskBundle{
 		Root:          filepath.Join(tasksRoot, topic, "tasks", "active", taskID),
-		RequiredFiles: defaultTaskFiles(now),
+		RequiredFiles: definition.defaultTaskFiles(now),
 		StatusFile:    "status.yaml",
 	}, nil
 }

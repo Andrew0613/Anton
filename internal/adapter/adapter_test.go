@@ -125,6 +125,11 @@ func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
 		"version: 1\n" +
 		"entrypoint:\n  path: AGENTS.md\n" +
 		"tasks:\n  root: .anton/tasks\n" +
+		"  planning_mode: hybrid\n" +
+		"run:\n" +
+		"  enabled: true\n" +
+		"  manifest: run.json\n" +
+		"  receipts_dir: receipts\n" +
 		"threads:\n  default_project_strategy: repo-root\n" +
 		"gates:\n" +
 		"  - name: go-test\n" +
@@ -134,6 +139,9 @@ func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
 		"      argv: [go, test, ./...]\n" +
 		"    timeout:\n" +
 		"      seconds: 120\n" +
+		"gate_profiles:\n" +
+		"  handoff:\n" +
+		"    required: [go-test]\n" +
 		"extensions:\n" +
 		"  history:\n" +
 		"    work_record_roots:\n" +
@@ -152,6 +160,15 @@ func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
 	}
 	if len(config.Gates) != 1 || config.Gates[0].Name != "go-test" {
 		t.Fatalf("gates = %#v", config.Gates)
+	}
+	if config.PlanningMode() != "hybrid" {
+		t.Fatalf("planning mode = %q", config.PlanningMode())
+	}
+	if !config.Run.Enabled || config.RunManifestName() != "run.json" || config.RunReceiptsDir() != "receipts" {
+		t.Fatalf("run config = %#v", config.Run)
+	}
+	if len(config.GateProfiles["handoff"].Required) != 1 || config.GateProfiles["handoff"].Required[0] != "go-test" {
+		t.Fatalf("gate profiles = %#v", config.GateProfiles)
 	}
 	if len(config.Extensions.History.WorkRecordRoots) != 1 || config.Extensions.History.WorkRecordRoots[0] != "worklog" {
 		t.Fatalf("history extensions = %#v", config.Extensions.History)
@@ -350,6 +367,25 @@ func TestLoadConfigRejectsInvalidAntonYAML(t *testing.T) {
 				"tasks:\n  root: .anton/tasks\n" +
 				"threads:\n  default_project_strategy: invalid\n",
 			want: "anton config threads.default_project_strategy must be one of: repo-root, none",
+		},
+		{
+			name: "invalid-planning-mode",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n  planning_mode: daemon\n" +
+				"threads:\n  default_project_strategy: repo-root\n",
+			want: "anton config tasks.planning_mode must be one of: planning_files, run_manifest, hybrid",
+		},
+		{
+			name: "empty-run-manifest",
+			content: "" +
+				"version: 1\n" +
+				"entrypoint:\n  path: AGENTS.md\n" +
+				"tasks:\n  root: .anton/tasks\n" +
+				"run:\n  manifest: \"\"\n  receipts_dir: receipts\n" +
+				"threads:\n  default_project_strategy: repo-root\n",
+			want: "anton config run.manifest must not be empty",
 		},
 		{
 			name: "empty-workspace-root",

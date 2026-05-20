@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "command": "run task set",
+  "error": {
+    "code": "run-task-set-failed",
+    "message": "must be one of: pending, in_progress, blocked, done, dropped"
+  }
+}

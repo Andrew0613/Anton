@@ -187,7 +187,14 @@ func TestDoctorJSONContextReceiptAcrossWorkspaceKinds(t *testing.T) {
 		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			if testCase.path == "" {
-				testCase.path = t.TempDir()
+				path, err := os.MkdirTemp("/var/tmp", "anton-doctor-plain-*")
+				if err != nil {
+					t.Fatalf("mktemp plain workspace: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = os.RemoveAll(path)
+				})
+				testCase.path = path
 				writeDoctorFile(t, filepath.Join(testCase.path, "notes.txt"), "plain workspace")
 			}
 
@@ -392,11 +399,11 @@ func withWorkingDirectory(t *testing.T, path string, fn func() int) int {
 	if err := os.Chdir(path); err != nil {
 		t.Fatalf("chdir %s: %v", path, err)
 	}
-	t.Cleanup(func() {
+	defer func() {
 		if err := os.Chdir(original); err != nil {
 			t.Fatalf("restore chdir: %v", err)
 		}
-	})
+	}()
 	return fn()
 }
 
