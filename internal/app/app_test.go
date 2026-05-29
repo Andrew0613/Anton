@@ -101,16 +101,32 @@ func TestSubcommandHelpWorksForPrimarySurfaces(t *testing.T) {
 	}
 }
 
-func TestTaskAliasNotRegisteredInSliceOne(t *testing.T) {
+func TestTaskCommandIsRegistered(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := Run([]string{"task", "--json"}, &stdout, &stderr, nil)
-	if exitCode != 2 {
-		t.Fatalf("exit code = %d, want 2", exitCode)
+	exitCode := Run([]string{"task", "help"}, &stdout, &stderr, nil)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
 	}
-	if !strings.Contains(stderr.String(), "unknown command: task") {
+	if !strings.Contains(stdout.String(), "anton task resolve") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestGlobalUsageIncludesGatesRun(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"--help"}, &stdout, &stderr, nil)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "anton gates <list|check|run> [--json]") {
+		t.Fatalf("stdout missing gates run surface: %s", stdout.String())
 	}
 }
 

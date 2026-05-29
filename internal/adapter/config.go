@@ -14,6 +14,7 @@ type Config struct {
 	Threads      ThreadsConfig                `yaml:"threads"`
 	Gates        []GateConfig                 `yaml:"gates"`
 	GateProfiles map[string]GateProfileConfig `yaml:"gate_profiles"`
+	Roots        RootsConfig                  `yaml:"roots"`
 	Extensions   ExtensionsConfig             `yaml:"extensions"`
 	Path         string                       `yaml:"-"`
 	Loaded       bool                         `yaml:"-"`
@@ -42,6 +43,15 @@ type RunConfig struct {
 type ThreadsConfig struct {
 	DefaultProjectStrategy string   `yaml:"default_project_strategy"`
 	WorkspaceRoots         []string `yaml:"workspace_roots"`
+}
+
+type RootsConfig struct {
+	StateRoot          string `yaml:"state"`
+	MemoryRoot         string `yaml:"memory"`
+	ArtifactRoot       string `yaml:"artifacts"`
+	ArchiveRoot        string `yaml:"archive"`
+	ViewRoot           string `yaml:"views"`
+	PolicyRegistryRoot string `yaml:"policy_registry"`
 }
 
 type GateConfig struct {
@@ -169,6 +179,14 @@ func defaultConfig() Config {
 			DefaultProjectStrategy: "repo-root",
 			WorkspaceRoots:         []string{},
 		},
+		Roots: RootsConfig{
+			StateRoot:          "docs/state",
+			MemoryRoot:         "docs/memory",
+			ArtifactRoot:       "docs/artifacts",
+			ArchiveRoot:        "docs/archive",
+			ViewRoot:           "docs/views",
+			PolicyRegistryRoot: "docs/agent-workflow/registries",
+		},
 		Gates:        []GateConfig{},
 		GateProfiles: map[string]GateProfileConfig{},
 	}
@@ -214,6 +232,24 @@ func validateConfig(config Config) error {
 		if trimString(root) == "" {
 			return fmt.Errorf("anton config threads.workspace_roots[%d] must not be empty", index)
 		}
+	}
+	if config.Roots.StateRoot != "" && trimString(config.Roots.StateRoot) == "" {
+		return fmt.Errorf("anton config roots.state must not be empty when declared")
+	}
+	if config.Roots.MemoryRoot != "" && trimString(config.Roots.MemoryRoot) == "" {
+		return fmt.Errorf("anton config roots.memory must not be empty when declared")
+	}
+	if config.Roots.ArtifactRoot != "" && trimString(config.Roots.ArtifactRoot) == "" {
+		return fmt.Errorf("anton config roots.artifacts must not be empty when declared")
+	}
+	if config.Roots.ArchiveRoot != "" && trimString(config.Roots.ArchiveRoot) == "" {
+		return fmt.Errorf("anton config roots.archive must not be empty when declared")
+	}
+	if config.Roots.ViewRoot != "" && trimString(config.Roots.ViewRoot) == "" {
+		return fmt.Errorf("anton config roots.views must not be empty when declared")
+	}
+	if config.Roots.PolicyRegistryRoot != "" && trimString(config.Roots.PolicyRegistryRoot) == "" {
+		return fmt.Errorf("anton config roots.policy_registry must not be empty when declared")
 	}
 	for index, root := range config.Extensions.History.WorkRecordRoots {
 		if trimString(root) == "" {
@@ -276,6 +312,54 @@ func (config Config) RunReceiptsDir() string {
 	value := trimString(config.Run.ReceiptsDir)
 	if value == "" {
 		return "receipts"
+	}
+	return value
+}
+
+func (config Config) StateRoot() string {
+	value := trimString(config.Roots.StateRoot)
+	if value == "" {
+		return "docs/state"
+	}
+	return value
+}
+
+func (config Config) MemoryRoot() string {
+	value := trimString(config.Roots.MemoryRoot)
+	if value == "" {
+		return "docs/memory"
+	}
+	return value
+}
+
+func (config Config) ArtifactRoot() string {
+	value := trimString(config.Roots.ArtifactRoot)
+	if value == "" {
+		return "docs/artifacts"
+	}
+	return value
+}
+
+func (config Config) ArchiveRoot() string {
+	value := trimString(config.Roots.ArchiveRoot)
+	if value == "" {
+		return "docs/archive"
+	}
+	return value
+}
+
+func (config Config) ViewRoot() string {
+	value := trimString(config.Roots.ViewRoot)
+	if value == "" {
+		return "docs/views"
+	}
+	return value
+}
+
+func (config Config) PolicyRegistryRoot() string {
+	value := trimString(config.Roots.PolicyRegistryRoot)
+	if value == "" {
+		return "docs/agent-workflow/registries"
 	}
 	return value
 }

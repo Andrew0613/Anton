@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/Andrew0613/Anton/internal/buildinfo"
+	"github.com/Andrew0613/Anton/internal/surface"
 )
 
 type response struct {
@@ -16,7 +17,8 @@ type response struct {
 }
 
 type responseData struct {
-	Version string `json:"version"`
+	Version      string                     `json:"version"`
+	Capabilities *surface.CapabilityReceipt `json:"capabilities,omitempty"`
 }
 
 type errorPayload struct {
@@ -39,7 +41,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		OK:      true,
 		Command: "version",
 		Data: &responseData{
-			Version: buildinfo.Version,
+			Version:      buildinfo.Version,
+			Capabilities: capabilityData(),
 		},
 	}
 
@@ -52,6 +55,11 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 
 	_, _ = fmt.Fprintf(stdout, "anton %s\n", buildinfo.Version)
 	return 0
+}
+
+func capabilityData() *surface.CapabilityReceipt {
+	receipt := surface.Capabilities(buildinfo.Version)
+	return &receipt
 }
 
 func writeError(code string, message string, asJSON bool, stdout io.Writer, stderr io.Writer, exitCode int) int {

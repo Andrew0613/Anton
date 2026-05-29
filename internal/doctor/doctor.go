@@ -74,6 +74,12 @@ type configContract struct {
 	RunReceiptsDir                string   `json:"run_receipts_dir"`
 	ThreadsDefaultProjectStrategy string   `json:"threads_default_project_strategy"`
 	ThreadsWorkspaceRoots         []string `json:"threads_workspace_roots,omitempty"`
+	StateRoot                     string   `json:"state_root"`
+	MemoryRoot                    string   `json:"memory_root"`
+	ArtifactRoot                  string   `json:"artifact_root"`
+	ArchiveRoot                   string   `json:"archive_root"`
+	ViewRoot                      string   `json:"view_root"`
+	PolicyRegistryRoot            string   `json:"policy_registry_root"`
 }
 
 type summary struct {
@@ -268,6 +274,12 @@ func collect(environ []string) (reportData, error) {
 			RunReceiptsDir:                resolved.Config.RunReceiptsDir(),
 			ThreadsDefaultProjectStrategy: resolved.Config.Threads.DefaultProjectStrategy,
 			ThreadsWorkspaceRoots:         resolved.Config.Threads.WorkspaceRoots,
+			StateRoot:                     resolved.Config.StateRoot(),
+			MemoryRoot:                    resolved.Config.MemoryRoot(),
+			ArtifactRoot:                  resolved.Config.ArtifactRoot(),
+			ArchiveRoot:                   resolved.Config.ArchiveRoot(),
+			ViewRoot:                      resolved.Config.ViewRoot(),
+			PolicyRegistryRoot:            resolved.Config.PolicyRegistryRoot(),
 		},
 		Context:        context,
 		TaskIdentity:   taskIdentity,

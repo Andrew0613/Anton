@@ -137,6 +137,28 @@ func TestWorkspacePrepareNotApproved(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCleanupPlanClassifiesResultPersistence(t *testing.T) {
+	repoRoot := makeTempRepo(t)
+	writeWorkspaceConfig(t, repoRoot, ".anton/workspaces")
+	writeFile(t, filepath.Join(repoRoot, "results", "evidence.txt"), "preserve me\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"cleanup-plan", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\n%s", exitCode, stdout.String())
+	}
+	payload := decodeResponse(t, stdout.Bytes())
+	if payload.Data == nil || payload.Data.Cockpit == nil || len(payload.Data.Cockpit.Workspaces) == 0 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Data.Cockpit.Workspaces[0].Classification != "result_persist_required" {
+		t.Fatalf("classification = %s payload=%s", payload.Data.Cockpit.Workspaces[0].Classification, stdout.String())
+	}
+}
+
 func TestWorkspaceRefsFindsTextReferencesAndReportsSkippedRoots(t *testing.T) {
 	repoRoot := makeTempRepo(t)
 	writeWorkspaceConfig(t, repoRoot, ".anton/workspaces")

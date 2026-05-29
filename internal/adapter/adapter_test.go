@@ -3,6 +3,7 @@ package adapter
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,52 @@ func TestLoadConfigAcceptsGatesAndHistoryExtensions(t *testing.T) {
 	}
 	if len(config.Extensions.History.WorkRecordRoots) != 1 || config.Extensions.History.WorkRecordRoots[0] != "worklog" {
 		t.Fatalf("history extensions = %#v", config.Extensions.History)
+	}
+}
+
+func TestLoadConfigAcceptsTypedRoots(t *testing.T) {
+	repoRoot := makeTempRepoRoot(t)
+	configPath := filepath.Join(repoRoot, "anton.yaml")
+	content := "" +
+		"version: 1\n" +
+		"entrypoint:\n  path: AGENTS.md\n" +
+		"tasks:\n  root: .anton/tasks\n" +
+		"threads:\n  default_project_strategy: repo-root\n" +
+		"roots:\n" +
+		"  state: docs/state\n" +
+		"  memory: docs/memory\n" +
+		"  artifacts: docs/artifacts\n" +
+		"  archive: docs/archive\n" +
+		"  views: docs/views\n" +
+		"  policy_registry: docs/agent-workflow/registries\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write anton.yaml: %v", err)
+	}
+
+	context, err := DetectContext(repoRoot, nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if config.StateRoot() != "docs/state" || config.PolicyRegistryRoot() != "docs/agent-workflow/registries" {
+		t.Fatalf("roots = %#v", config.Roots)
+	}
+}
+
+func TestLoadConfigDefaultsTypedRoots(t *testing.T) {
+	context, err := DetectContext(fixturePath(t, "repo-root"), nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if config.StateRoot() != "docs/state" || config.MemoryRoot() != "docs/memory" || config.ArtifactRoot() != "docs/artifacts" {
+		t.Fatalf("default typed roots are not stable: %#v", config.Roots)
 	}
 }
 
@@ -642,7 +689,11 @@ func TestCanonicalStatusReadParsesConfiguredFixture(t *testing.T) {
 
 func fixturePath(t *testing.T, name string) string {
 	t.Helper()
-	return filepath.Join("testdata", "contexts", name)
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("runtime.Caller failed")
+	}
+	return filepath.Join(filepath.Dir(file), "testdata", "contexts", name)
 }
 
 func mustLoadConfig(t *testing.T, context Context) Config {

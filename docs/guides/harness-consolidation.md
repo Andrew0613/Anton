@@ -24,6 +24,14 @@ or deployment system.
    lifecycle remains owned by `task-state`: identity, status, freshness, close,
    reopen, retarget, and handoff readiness stay there.
 
+   During typed-state migration, use:
+
+   - `anton task resolve --json`
+   - `anton task list --state active --json`
+
+   These commands read `docs/state/tasks` projections and support `--dual-read`
+   parity warnings against legacy task-bundle projections.
+
 3. Initialize the run manifest.
 
    Once the run surface lands, use `anton run init --json` to create passive
@@ -46,6 +54,14 @@ or deployment system.
    pipelines, destructive operations, and project-specific infra policy outside
    Anton core unless a separate reviewed safety contract exists.
 
+   Then run:
+
+   - `anton check run --json`
+   - `anton check repair-plan --json`
+
+   to classify actionable issues into `blocking_now`, `safe_autofixes`,
+   `human_decisions_needed`, and `archive_or_history_only`.
+
 6. Use adopter inventory to classify local harness files.
 
    The intended `anton adopt harness-inventory` report should classify files as
@@ -57,6 +73,14 @@ or deployment system.
    `handoff` should summarize lifecycle state, run checklist progress, recent
    audit notes, and gate receipts. It should still degrade gracefully for repos
    that only have legacy planning files.
+
+8. Use workspace cockpit for cleanup planning.
+
+   - `anton workspace list --json`
+   - `anton workspace doctor --json`
+   - `anton workspace cleanup-plan --json`
+
+   The cockpit remains read-only and uses metadata-only artifact footprints.
 
 ## For Repos Using Planning-With-Files
 

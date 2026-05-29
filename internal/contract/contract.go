@@ -51,6 +51,12 @@ type Config struct {
 	RunReceiptsDir                string   `json:"run_receipts_dir"`
 	ThreadsDefaultProjectStrategy string   `json:"threads_default_project_strategy"`
 	ThreadsWorkspaceRoots         []string `json:"threads_workspace_roots,omitempty"`
+	StateRoot                     string   `json:"state_root"`
+	MemoryRoot                    string   `json:"memory_root"`
+	ArtifactRoot                  string   `json:"artifact_root"`
+	ArchiveRoot                   string   `json:"archive_root"`
+	ViewRoot                      string   `json:"view_root"`
+	PolicyRegistryRoot            string   `json:"policy_registry_root"`
 }
 
 type Summary struct {
@@ -117,6 +123,12 @@ func Build(input Input) ContractV1 {
 			RunReceiptsDir:                input.Config.RunReceiptsDir(),
 			ThreadsDefaultProjectStrategy: input.Config.Threads.DefaultProjectStrategy,
 			ThreadsWorkspaceRoots:         input.Config.Threads.WorkspaceRoots,
+			StateRoot:                     input.Config.StateRoot(),
+			MemoryRoot:                    input.Config.MemoryRoot(),
+			ArtifactRoot:                  input.Config.ArtifactRoot(),
+			ArchiveRoot:                   input.Config.ArchiveRoot(),
+			ViewRoot:                      input.Config.ViewRoot(),
+			PolicyRegistryRoot:            input.Config.PolicyRegistryRoot(),
 		},
 		TaskIdentity:   input.TaskIdentity,
 		Checks:         input.Checks,

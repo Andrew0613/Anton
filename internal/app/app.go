@@ -6,6 +6,7 @@ import (
 
 	"github.com/Andrew0613/Anton/internal/adopt"
 	"github.com/Andrew0613/Anton/internal/buildinfo"
+	"github.com/Andrew0613/Anton/internal/check"
 	"github.com/Andrew0613/Anton/internal/contextcmd"
 	"github.com/Andrew0613/Anton/internal/doctor"
 	"github.com/Andrew0613/Anton/internal/entrypoint"
@@ -16,6 +17,8 @@ import (
 	"github.com/Andrew0613/Anton/internal/migrate"
 	"github.com/Andrew0613/Anton/internal/preflight"
 	"github.com/Andrew0613/Anton/internal/run"
+	"github.com/Andrew0613/Anton/internal/surface"
+	"github.com/Andrew0613/Anton/internal/task"
 	"github.com/Andrew0613/Anton/internal/taskstate"
 	"github.com/Andrew0613/Anton/internal/threads"
 	"github.com/Andrew0613/Anton/internal/versioncmd"
@@ -28,30 +31,7 @@ const (
 )
 
 func globalUsageText() string {
-	return fmt.Sprintf(`Anton %s is a reusable harness CLI.
-
-Usage:
-  anton [--json] <command> [...]
-  anton doctor [--json]
-  anton context [--json|--explain]
-  anton preflight --profile <investigation|implementation> [--json]
-  anton task-state <init|pulse|check|env|service|freshness|sync-card|close|reopen|retarget|import> [--json]
-  anton run <init|status|task|audit|close> [--json]
-  anton handoff <build|persist-results> [--json]
-  anton threads <doctor|recent|insights|brief|recipe> [--json]
-  anton adopt plan [--json]
-  anton memory <status|update> [--json]
-  anton history <show|sync> [--json]
-  anton gates <list|check> [--json]
-  anton entrypoint check [--json]
-  anton workspace <inspect|check|refs> [--json]
-  anton migrate <plan|readiness> [--json]
-  anton version [--json]
-
-Flags:
-  --help
-  --version
-`, buildinfo.Version)
+	return surface.GlobalUsage(buildinfo.Version)
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
@@ -70,6 +50,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return preflight.Run(args[1:], stdout, stderr, environ)
 	case "task-state":
 		return taskstate.Run(args[1:], stdout, stderr, environ)
+	case "task":
+		return task.Run(args[1:], stdout, stderr, environ)
 	case "run":
 		return run.Run(args[1:], stdout, stderr, environ)
 	case "handoff":
@@ -84,6 +66,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return history.Run(args[1:], stdout, stderr, environ)
 	case "gates":
 		return gates.Run(args[1:], stdout, stderr, environ)
+	case "check":
+		return check.Run(args[1:], stdout, stderr, environ)
 	case "entrypoint":
 		return entrypoint.Run(args[1:], stdout, stderr, environ)
 	case "workspace":

@@ -32,6 +32,7 @@ The current checkout command families are:
 - `context`
 - `preflight`
 - `task-state`
+- `task`
 - `run`
 - `handoff`
 - `threads`
@@ -39,6 +40,7 @@ The current checkout command families are:
 - `memory`
 - `history`
 - `gates`
+- `check`
 - `entrypoint`
 - `workspace`
 - `migrate`
@@ -144,6 +146,12 @@ Supported fields:
 - `gate_profiles`
 - `threads.default_project_strategy`
 - `threads.workspace_roots`
+- `roots.state`
+- `roots.memory`
+- `roots.artifacts`
+- `roots.archive`
+- `roots.views`
+- `roots.policy_registry`
 
 Unknown fields are rejected. This keeps contract drift explicit.
 
@@ -157,6 +165,13 @@ Default behavior:
 - run manifest: `run.json`
 - run receipts: `receipts`
 - optional thread workspaces: `.anton/workspaces/<project>/...`
+- typed roots:
+  - state: `docs/state`
+  - memory: `docs/memory`
+  - artifacts: `docs/artifacts`
+  - archive: `docs/archive`
+  - views: `docs/views`
+  - policy registry: `docs/agent-workflow/registries`
 
 Config source is always shown in command output:
 
@@ -211,6 +226,17 @@ projection artifacts for repos that still use planning-file workflows. New
 adopters can use Anton-native task state plus the run manifest for
 machine-checkable work state.
 
+### State Resolver
+
+`anton task resolve --json` reads checked-in `docs/state/tasks` projections and
+answers current task truth without scanning markdown directories.
+
+`anton task list --state active --json` emits the active-task inventory needed
+by activation gates.
+
+Both commands support `--dual-read` to report parity warnings against legacy
+task bundle projections during migration windows.
+
 ### Run Manifest
 
 `anton run` owns passive execution state for the active task: checklist items,
@@ -253,6 +279,26 @@ native Anton surface for bounded local evidence.
 bounded execution subset for declared argv-style command gates. It enforces a
 repo-contained cwd, timeouts, output caps, destructive-gate blocking by default,
 and optional `--attach-run` receipts that append to the run manifest.
+
+### Checks
+
+`check run` evaluates machine-readable policy registry rules and state inventory
+issues into actionable buckets:
+
+- `blocking_now`
+- `safe_autofixes`
+- `human_decisions_needed`
+- `archive_or_history_only`
+
+`check repair-plan` emits non-destructive safe command candidates and manual
+follow-up items.
+
+### Workspace Cockpit
+
+`workspace list`, `workspace doctor`, and `workspace cleanup-plan` provide
+Anton-native workspace classification and cleanup planning. Result footprints are
+metadata-only (`path`, `file_count`, `total_bytes`) and do not read payload
+contents.
 
 ## Command Reference
 

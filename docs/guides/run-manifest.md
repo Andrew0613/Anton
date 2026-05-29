@@ -20,6 +20,11 @@ Use a run manifest to record:
 Task lifecycle still belongs to `anton task-state`. The run manifest should not
 invent task identity, close or reopen tasks, or replace status ownership.
 
+For typed-state repos, task truth and inventory are resolved by:
+
+- `anton task resolve --json`
+- `anton task list --state active --json`
+
 ## Shape
 
 A task-scoped manifest is expected to live beside the task bundle, for example:

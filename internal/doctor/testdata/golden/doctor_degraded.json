@@ -29,7 +29,13 @@
       "run_enabled": false,
       "run_manifest": "run.json",
       "run_receipts_dir": "receipts",
-      "threads_default_project_strategy": "repo-root"
+      "threads_default_project_strategy": "repo-root",
+      "state_root": "docs/state",
+      "memory_root": "docs/memory",
+      "artifact_root": "docs/artifacts",
+      "archive_root": "docs/archive",
+      "view_root": "docs/views",
+      "policy_registry_root": "docs/agent-workflow/registries"
     },
     "task_identity": {
       "conflict": false
@@ -63,7 +69,13 @@
       "run_enabled": false,
       "run_manifest": "run.json",
       "run_receipts_dir": "receipts",
-        "threads_default_project_strategy": "repo-root"
+        "threads_default_project_strategy": "repo-root",
+        "state_root": "docs/state",
+        "memory_root": "docs/memory",
+        "artifact_root": "docs/artifacts",
+        "archive_root": "docs/archive",
+        "view_root": "docs/views",
+        "policy_registry_root": "docs/agent-workflow/registries"
       },
       "task_identity": {
         "conflict": false

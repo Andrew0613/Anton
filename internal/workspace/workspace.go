@@ -46,15 +46,16 @@ type summary struct {
 }
 
 type commandData struct {
-	Adapter          string       `json:"adapter"`
-	WorkingDirectory string       `json:"working_directory"`
-	RepositoryRoot   string       `json:"repository_root,omitempty"`
-	ConfigPath       string       `json:"config_path"`
-	ConfigSource     string       `json:"config_source"`
-	Roots            []rootStatus `json:"roots"`
-	Findings         []finding    `json:"findings"`
-	Summary          summary      `json:"summary"`
-	Refs             *RefsReport  `json:"refs,omitempty"`
+	Adapter          string         `json:"adapter"`
+	WorkingDirectory string         `json:"working_directory"`
+	RepositoryRoot   string         `json:"repository_root,omitempty"`
+	ConfigPath       string         `json:"config_path"`
+	ConfigSource     string         `json:"config_source"`
+	Roots            []rootStatus   `json:"roots"`
+	Findings         []finding      `json:"findings"`
+	Summary          summary        `json:"summary"`
+	Refs             *RefsReport    `json:"refs,omitempty"`
+	Cockpit          *CockpitReport `json:"cockpit,omitempty"`
 }
 
 type errorPayload struct {
@@ -78,6 +79,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return run(args[1:], "workspace inspect", stdout, stderr, environ)
 	case "check":
 		return run(args[1:], "workspace check", stdout, stderr, environ)
+	case "list":
+		return runCockpit(args[1:], "workspace list", stdout, stderr, environ)
+	case "doctor":
+		return runCockpit(args[1:], "workspace doctor", stdout, stderr, environ)
+	case "cleanup-plan":
+		return runCockpit(args[1:], "workspace cleanup-plan", stdout, stderr, environ)
 	case "refs":
 		return runRefs(args[1:], stdout, stderr, environ)
 	case "prepare":
@@ -305,6 +312,9 @@ func usageText() string {
 	return `Usage:
   anton workspace inspect [--json]
   anton workspace check [--json]
+  anton workspace list [--json]
+  anton workspace doctor [--json]
+  anton workspace cleanup-plan [--json]
   anton workspace refs --target PATH [--json]
 `
 }
@@ -320,6 +330,9 @@ func writeResponse(command string, data commandData, asJSON bool, stdout io.Writ
 	_, _ = fmt.Fprintf(stdout, "Anton %s\nStatus: %s\nRoots: %d\n", command, data.Summary.Status, data.Summary.RootCount)
 	if data.Refs != nil {
 		_, _ = fmt.Fprintf(stdout, "Target: %s\nReferences: %d\nRecommendation: %s\n", data.Refs.Target.Relative, len(data.Refs.ReferenceHits), data.Refs.Summary.Recommendation)
+	}
+	if data.Cockpit != nil {
+		_, _ = fmt.Fprintf(stdout, "Workspaces: %d\nCockpit status: %s\n", len(data.Cockpit.Workspaces), data.Cockpit.Summary.Status)
 	}
 	return exitCode
 }
@@ -347,4 +360,35 @@ func writeError(command string, code string, message string, asJSON bool, stdout
 	}
 	_, _ = fmt.Fprintf(stderr, "%s\n", message)
 	return exitCode
+}
+
+func runCockpit(args []string, command string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	opts, err := parseOptions(args)
+	if err != nil {
+		return writeError(command, "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+	}
+	report, err := BuildCockpit(environ)
+	if err != nil {
+		return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+	data := commandData{
+		Adapter:          report.Adapter,
+		WorkingDirectory: report.WorkingDirectory,
+		RepositoryRoot:   report.RepositoryRoot,
+		ConfigPath:       report.ConfigPath,
+		ConfigSource:     report.ConfigSource,
+		Findings:         report.Findings,
+		Cockpit:          &report,
+		Summary: summary{
+			Status:       report.Summary.Status,
+			RootCount:    len(report.Workspaces),
+			WarningCount: report.Summary.SplitBrainCount,
+			ErrorCount:   report.Summary.LockedAttentionCount,
+		},
+	}
+	exitCode := 0
+	if command == "workspace doctor" && report.Summary.Status == "blocked" {
+		exitCode = 1
+	}
+	return writeResponse(command, data, opts.JSON, stdout, exitCode)
 }
