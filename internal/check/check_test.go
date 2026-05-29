@@ -110,6 +110,49 @@ func TestCheckRunAcceptsProvisionalEntriesRegistry(t *testing.T) {
 	}
 }
 
+func TestCheckRunEvaluatesStateDualReadParityRule(t *testing.T) {
+	repo := makeCheckRepo(t)
+	configureTopicLayerCheckRepo(t, repo)
+	writeCheckFile(t, filepath.Join(repo, "docs", "state", "tasks", "0062_hard_cut.yaml"), ""+
+		"task_id: 0062_hard_cut\n"+
+		"topic: Tooling\n"+
+		"lifecycle: active\n")
+	writeCheckFile(t, filepath.Join(repo, "docs", "agent-workflow", "registries", "checks.yaml"), ""+
+		"rules:\n"+
+		"  - rule_id: state-dual-read-parity\n"+
+		"    owner: harness\n"+
+		"    category: state\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: state_dual_read_parity\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := withCheckWD(t, repo, func() int {
+		return Run([]string{"run", "--json"}, &stdout, &stderr, nil)
+	})
+	if exit != 1 {
+		t.Fatalf("run exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Data struct {
+			Issues []struct {
+				RuleID string `json:"rule_id"`
+				Code   string `json:"code"`
+			} `json:"issues"`
+			Summary struct {
+				Blocking int `json:"blocking"`
+			} `json:"summary"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Data.Summary.Blocking == 0 || !hasCheckIssue(payload.Data.Issues, "state-dual-read-parity", "state-dual-read-missing-current-legacy") {
+		t.Fatalf("expected state dual-read parity issue: %s", stdout.String())
+	}
+}
+
 func makeCheckRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -117,6 +160,15 @@ func makeCheckRepo(t *testing.T) string {
 	writeCheckFile(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
 	writeCheckFile(t, filepath.Join(root, "anton.yaml"), "version: 1\nentrypoint:\n  path: AGENTS.md\ntasks:\n  root: .anton/tasks\nthreads:\n  default_project_strategy: repo-root\n")
 	return root
+}
+
+func configureTopicLayerCheckRepo(t *testing.T, repo string) {
+	t.Helper()
+	writeCheckFile(t, filepath.Join(repo, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: physedit-v1\n"+
+		"threads:\n  default_project_strategy: repo-root\n")
 }
 
 func writeCheckFile(t *testing.T, path string, content string) {
@@ -142,4 +194,16 @@ func withCheckWD(t *testing.T, dir string, fn func() int) int {
 		_ = os.Chdir(original)
 	})
 	return fn()
+}
+
+func hasCheckIssue(issues []struct {
+	RuleID string `json:"rule_id"`
+	Code   string `json:"code"`
+}, ruleID string, code string) bool {
+	for _, issue := range issues {
+		if issue.RuleID == ruleID && issue.Code == code {
+			return true
+		}
+	}
+	return false
 }

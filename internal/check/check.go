@@ -196,6 +196,19 @@ func collect(environ []string) (runData, error) {
 		if strings.TrimSpace(rule.Check.Kind) == "" {
 			continue
 		}
+		if rule.Check.Kind == "state_dual_read_parity" {
+			dualReadInventory, loadErr := state.LoadInventory(resolved, true)
+			if loadErr != nil {
+				return runData{}, loadErr
+			}
+			for _, item := range dualReadInventory.Issues {
+				if !isDualReadStateIssue(item) {
+					continue
+				}
+				issues = append(issues, issueFromDualReadRule(rule, item))
+			}
+			continue
+		}
 		evaluated, failed := evaluateRule(base, rule)
 		if failed {
 			issues = append(issues, evaluated)
@@ -284,18 +297,44 @@ func issueFromPolicy(item policy.Issue) ActionableIssue {
 func issueFromState(item state.Issue) ActionableIssue {
 	severity := normalizeSeverity(item.Level)
 	issue := ActionableIssue{
-		RuleID:      fallback(item.RuleID, "state.inventory"),
-		Owner:       "harness",
-		Category:    "state",
-		Severity:    severity,
-		Code:        item.Code,
-		Message:     item.Message,
-		Blocking:    severity == "error",
-		Autofix:     false,
-		SafeCommand: "",
+		RuleID:          fallback(item.RuleID, "state.inventory"),
+		Owner:           "harness",
+		Category:        "state",
+		Severity:        severity,
+		CanonicalSource: item.File,
+		Code:            item.Code,
+		Message:         item.Message,
+		Blocking:        severity == "error",
+		Autofix:         false,
+		SafeCommand:     "",
 	}
 	issue.Bucket = chooseBucket(issue, false)
 	return issue
+}
+
+func issueFromDualReadRule(rule policy.Rule, item state.Issue) ActionableIssue {
+	severity := normalizeSeverity(item.Level)
+	if normalizeSeverity(rule.Severity) == "error" {
+		severity = "error"
+	}
+	issue := ActionableIssue{
+		RuleID:          fallback(rule.RuleID, fallback(item.RuleID, "state.dual_read")),
+		Owner:           fallback(rule.Owner, "harness"),
+		Category:        fallback(rule.Category, "state"),
+		Severity:        severity,
+		CanonicalSource: fallback(item.File, rule.CanonicalSource),
+		Code:            item.Code,
+		Message:         item.Message,
+		Blocking:        rule.Blocking || severity == "error",
+		Autofix:         rule.Autofix,
+		SafeCommand:     rule.SafeCommand,
+	}
+	issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
+	return issue
+}
+
+func isDualReadStateIssue(item state.Issue) bool {
+	return strings.HasPrefix(item.RuleID, "state.dual_read.") || strings.HasPrefix(item.Code, "state-dual-read-")
 }
 
 func bucketize(issues []ActionableIssue) checkBuckets {

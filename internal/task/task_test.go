@@ -58,6 +58,38 @@ func TestTaskResolveAndList(t *testing.T) {
 	}
 }
 
+func TestTaskListDualReadExitsNonzeroOnParityErrors(t *testing.T) {
+	repo := makeTaskRepo(t)
+	configureTopicLayerTaskRepo(t, repo)
+	writeTaskFile(t, filepath.Join(repo, "docs", "state", "tasks", "0062_hard_cut.yaml"), ""+
+		"task_id: 0062_hard_cut\n"+
+		"topic: Tooling\n"+
+		"lifecycle: active\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := withTaskWD(t, repo, func() int {
+		return Run([]string{"list", "--state", "active", "--dual-read", "--json"}, &stdout, &stderr, nil)
+	})
+	if exit != 1 {
+		t.Fatalf("list exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Data struct {
+			Issues []struct {
+				Code  string `json:"code"`
+				Level string `json:"level"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list payload: %v", err)
+	}
+	if !hasTaskIssue(payload.Data.Issues, "state-dual-read-missing-current-legacy", "error") {
+		t.Fatalf("expected actionable parity issue code: %s", stdout.String())
+	}
+}
+
 func makeTaskRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -65,6 +97,15 @@ func makeTaskRepo(t *testing.T) string {
 	writeTaskFile(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
 	writeTaskFile(t, filepath.Join(root, "anton.yaml"), "version: 1\nentrypoint:\n  path: AGENTS.md\ntasks:\n  root: .anton/tasks\nthreads:\n  default_project_strategy: repo-root\n")
 	return root
+}
+
+func configureTopicLayerTaskRepo(t *testing.T, repo string) {
+	t.Helper()
+	writeTaskFile(t, filepath.Join(repo, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: physedit-v1\n"+
+		"threads:\n  default_project_strategy: repo-root\n")
 }
 
 func writeTaskFile(t *testing.T, path string, content string) {
@@ -90,4 +131,16 @@ func withTaskWD(t *testing.T, dir string, fn func() int) int {
 		_ = os.Chdir(original)
 	})
 	return fn()
+}
+
+func hasTaskIssue(issues []struct {
+	Code  string `json:"code"`
+	Level string `json:"level"`
+}, code string, level string) bool {
+	for _, issue := range issues {
+		if issue.Code == code && issue.Level == level {
+			return true
+		}
+	}
+	return false
 }

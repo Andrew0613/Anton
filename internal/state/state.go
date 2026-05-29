@@ -47,16 +47,28 @@ type Issue struct {
 	RepairHint string `json:"repair_hint,omitempty"`
 }
 
+type LegacyTaskRecord struct {
+	TaskID         string `json:"task_id"`
+	Topic          string `json:"topic,omitempty"`
+	Lifecycle      string `json:"lifecycle,omitempty"`
+	Phase          string `json:"phase,omitempty"`
+	SourceFile     string `json:"source_file"`
+	Classification string `json:"classification"`
+	Reason         string `json:"reason,omitempty"`
+}
+
 type Inventory struct {
-	StateRoot          string       `json:"state_root"`
-	TasksDir           string       `json:"tasks_dir"`
-	SourceRevision     string       `json:"source_revision,omitempty"`
-	Tasks              []TaskRecord `json:"tasks"`
-	Active             []TaskRecord `json:"active"`
-	Issues             []Issue      `json:"issues,omitempty"`
-	DualReadEnabled    bool         `json:"dual_read_enabled"`
-	LegacyTasksRoot    string       `json:"legacy_tasks_root"`
-	LegacyStatusSchema string       `json:"legacy_status_schema"`
+	StateRoot          string             `json:"state_root"`
+	TasksDir           string             `json:"tasks_dir"`
+	SourceRevision     string             `json:"source_revision,omitempty"`
+	Tasks              []TaskRecord       `json:"tasks"`
+	Active             []TaskRecord       `json:"active"`
+	LegacyTasks        []LegacyTaskRecord `json:"legacy_tasks,omitempty"`
+	LegacyActive       []LegacyTaskRecord `json:"legacy_active,omitempty"`
+	Issues             []Issue            `json:"issues,omitempty"`
+	DualReadEnabled    bool               `json:"dual_read_enabled"`
+	LegacyTasksRoot    string             `json:"legacy_tasks_root"`
+	LegacyStatusSchema string             `json:"legacy_status_schema"`
 }
 
 func LoadInventory(resolved adapter.Resolved, dualRead bool) (Inventory, error) {
@@ -82,8 +94,8 @@ func LoadInventory(resolved adapter.Resolved, dualRead bool) (Inventory, error) 
 		inventory.SourceRevision = revision
 	}
 
-	info, err := os.Stat(tasksDir)
-	if err != nil {
+	tasksDirExists := false
+	if info, err := os.Stat(tasksDir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			inventory.Issues = append(inventory.Issues, Issue{
 				Level:      "warning",
@@ -93,48 +105,58 @@ func LoadInventory(resolved adapter.Resolved, dualRead bool) (Inventory, error) 
 				Message:    "state tasks directory does not exist",
 				RepairHint: "create docs/state/tasks and add task projection files",
 			})
-			return inventory, nil
+		} else {
+			return inventory, fmt.Errorf("stat %s: %w", tasksDir, err)
 		}
-		return inventory, fmt.Errorf("stat %s: %w", tasksDir, err)
-	}
-	if !info.IsDir() {
+	} else if !info.IsDir() {
 		return inventory, fmt.Errorf("state tasks path is not a directory: %s", tasksDir)
+	} else {
+		tasksDirExists = true
 	}
 
-	if err := filepath.WalkDir(tasksDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
+	if tasksDirExists {
+		if err := filepath.WalkDir(tasksDir, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".yaml" && ext != ".yml" {
+				return nil
+			}
+			record, parseErr := parseTaskFile(tasksDir, path)
+			if parseErr != nil {
+				inventory.Issues = append(inventory.Issues, Issue{
+					Level:      "error",
+					Code:       "state-task-parse-failed",
+					RuleID:     "state.inventory.file_schema",
+					File:       path,
+					Message:    parseErr.Error(),
+					RepairHint: "fix task projection YAML fields or move malformed file into archive",
+				})
+				return nil
+			}
+			inventory.Tasks = append(inventory.Tasks, record)
+			if isActive(record) {
+				inventory.Active = append(inventory.Active, record)
+			}
 			return nil
+		}); err != nil {
+			return inventory, err
 		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		record, parseErr := parseTaskFile(tasksDir, path)
-		if parseErr != nil {
-			inventory.Issues = append(inventory.Issues, Issue{
-				Level:      "error",
-				Code:       "state-task-parse-failed",
-				RuleID:     "state.inventory.file_schema",
-				File:       path,
-				Message:    parseErr.Error(),
-				RepairHint: "fix task projection YAML fields or move malformed file into archive",
-			})
-			return nil
-		}
-		inventory.Tasks = append(inventory.Tasks, record)
-		if isActive(record) {
-			inventory.Active = append(inventory.Active, record)
-		}
-		return nil
-	}); err != nil {
-		return inventory, err
 	}
 
 	if dualRead {
-		inventory.Issues = append(inventory.Issues, checkDualReadParity(inventory.LegacyTasksRoot, resolved.Config, inventory.Active)...)
+		legacyInventory, issues, err := scanLegacyInventory(inventory.LegacyTasksRoot, resolved.Config)
+		if err != nil {
+			return inventory, err
+		}
+		inventory.LegacyTasks = legacyInventory.Tasks
+		inventory.LegacyActive = legacyInventory.Active
+		inventory.Issues = append(inventory.Issues, issues...)
+		inventory.Issues = append(inventory.Issues, checkDualReadParity(inventory.LegacyTasksRoot, resolved.Config, inventory.Active, legacyInventory)...)
 	}
 	return inventory, nil
 }
@@ -220,19 +242,55 @@ func isActive(record TaskRecord) bool {
 	return lifecycle == "active"
 }
 
-func checkDualReadParity(legacyRoot string, config adapter.Config, active []TaskRecord) []Issue {
+func checkDualReadParity(legacyRoot string, config adapter.Config, active []TaskRecord, legacy legacyInventory) []Issue {
 	issues := []Issue{}
+	if usesTopicLayerLegacy(config) {
+		activeByID := map[string]TaskRecord{}
+		for _, item := range active {
+			activeByID[item.TaskID] = item
+		}
+		legacyActiveByID := map[string]LegacyTaskRecord{}
+		for _, item := range legacy.Active {
+			legacyActiveByID[item.TaskID] = item
+			if _, found := activeByID[item.TaskID]; found {
+				continue
+			}
+			issues = append(issues, Issue{
+				Level:      "error",
+				Code:       "state-dual-read-missing-state-projection",
+				RuleID:     "state.dual_read.state_projection",
+				File:       filepath.Join(legacyRoot, item.SourceFile),
+				Message:    fmt.Sprintf("current legacy active task %q has no active docs/state task projection", item.TaskID),
+				RepairHint: "create or refresh docs/state/tasks projection with lifecycle: active for this task",
+			})
+		}
+		for _, item := range active {
+			if _, found := legacyActiveByID[item.TaskID]; found {
+				continue
+			}
+			issues = append(issues, Issue{
+				Level:      "error",
+				Code:       "state-dual-read-missing-current-legacy",
+				RuleID:     "state.dual_read.current_legacy_presence",
+				File:       item.SourceFile,
+				Message:    fmt.Sprintf("active state task %q has no matching current legacy active status.yaml", item.TaskID),
+				RepairHint: "create/update project_progress/<Topic>/tasks/active/<id>/status.yaml with task.lifecycle: active or move the state projection out of active",
+			})
+		}
+		return issues
+	}
+
 	for _, item := range active {
 		found := hasLegacyStatus(legacyRoot, config, item.TaskID)
 		if found {
 			continue
 		}
 		issues = append(issues, Issue{
-			Level:      "warning",
-			Code:       "state-dual-read-missing-legacy",
-			RuleID:     "state.dual_read.legacy_presence",
+			Level:      "error",
+			Code:       "state-dual-read-missing-current-legacy",
+			RuleID:     "state.dual_read.current_legacy_presence",
 			File:       legacyRoot,
-			Message:    fmt.Sprintf("active state task %q has no matching legacy status.yaml projection", item.TaskID),
+			Message:    fmt.Sprintf("active state task %q has no matching current legacy status.yaml", item.TaskID),
 			RepairHint: "either create/update legacy projection during parity window or classify the task as archive-only",
 		})
 	}
