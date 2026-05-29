@@ -2,9 +2,13 @@ package check
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,7 +73,7 @@ func TestCheckRunAndRepairPlan(t *testing.T) {
 	}
 }
 
-func TestCheckRunAcceptsProvisionalEntriesRegistry(t *testing.T) {
+func TestCheckRunRejectsDeclarationOnlyEntriesRegistry(t *testing.T) {
 	repo := makeCheckRepo(t)
 	if err := os.MkdirAll(filepath.Join(repo, "docs", "state", "tasks"), 0o755); err != nil {
 		t.Fatalf("mkdir state tasks: %v", err)
@@ -92,21 +96,142 @@ func TestCheckRunAcceptsProvisionalEntriesRegistry(t *testing.T) {
 	exit := withCheckWD(t, repo, func() int {
 		return Run([]string{"run", "--json"}, &stdout, &stderr, nil)
 	})
-	if exit != 0 {
+	if exit != 1 {
 		t.Fatalf("run exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
 	}
 	var payload struct {
 		Data struct {
-			Summary struct {
-				TotalIssues int `json:"total_issues"`
-			} `json:"summary"`
+			Issues []struct {
+				Code string `json:"code"`
+			} `json:"issues"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.Data.Summary.TotalIssues != 0 {
-		t.Fatalf("expected no issues for declaration-only registry: %s", stdout.String())
+	if !hasCode(payload.Data.Issues, "policy-rule-kind-missing") {
+		t.Fatalf("expected missing check.kind issue: %s", stdout.String())
+	}
+}
+
+func TestCheckRunEvaluatesStructuredReceiptCoverageAndViewRules(t *testing.T) {
+	repo := makeCheckRepo(t)
+	writeCheckFile(t, filepath.Join(repo, "docs", "archive", "migrations", "pre_activation_readiness_receipt.md"), "- status: `ready_for_activation`\n")
+	writeCheckFile(t, filepath.Join(repo, "docs", "agent-workflow", "registries", "checker_coverage.yaml"), ""+
+		"coverage:\n"+
+		"  - legacy_check_id: A\n"+
+		"    status: covered\n"+
+		"  - legacy_check_id: B\n"+
+		"    status: missing\n")
+	writeCheckFile(t, filepath.Join(repo, "docs", "views", "briefs", "repo_health_brief.md"), ""+
+		"---\n"+
+		"generated_at: \"2026-05-29T20:00:00+08:00\"\n"+
+		"source_tree_clean: false\n"+
+		"---\n"+
+		"# Brief\n")
+	writeCheckFile(t, filepath.Join(repo, "docs", "agent-workflow", "registries", "checks.yaml"), ""+
+		"rules:\n"+
+		"  - rule_id: readiness-status\n"+
+		"    owner: harness\n"+
+		"    category: activation\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: file_contains\n"+
+		"      path: docs/archive/migrations/pre_activation_readiness_receipt.md\n"+
+		"      contains: 'status: `ready_for_activation`'\n"+
+		"  - rule_id: checker-coverage\n"+
+		"    owner: harness\n"+
+		"    category: coverage\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: yaml_all_fields_equal\n"+
+		"      path: docs/agent-workflow/registries/checker_coverage.yaml\n"+
+		"      field: coverage.*.status\n"+
+		"      equals: covered\n"+
+		"  - rule_id: view-clean\n"+
+		"    owner: harness\n"+
+		"    category: views\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: frontmatter_field_equals\n"+
+		"      path: docs/views/briefs/repo_health_brief.md\n"+
+		"      field: source_tree_clean\n"+
+		"      equals: \"true\"\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := withCheckWD(t, repo, func() int {
+		return Run([]string{"run", "--json"}, &stdout, &stderr, nil)
+	})
+	if exit != 1 {
+		t.Fatalf("run exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Data struct {
+			Issues []struct {
+				RuleID string `json:"rule_id"`
+				Code   string `json:"code"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !hasCheckIssue(payload.Data.Issues, "checker-coverage", "yaml-field-mismatch") {
+		t.Fatalf("expected checker coverage issue: %s", stdout.String())
+	}
+	if !hasCheckIssue(payload.Data.Issues, "view-clean", "frontmatter-field-mismatch") {
+		t.Fatalf("expected view clean issue: %s", stdout.String())
+	}
+}
+
+func TestCheckRunRejectsMissingCheckOperands(t *testing.T) {
+	repo := makeCheckRepo(t)
+	writeCheckFile(t, filepath.Join(repo, "docs", "agent-workflow", "registries", "checks.yaml"), ""+
+		"rules:\n"+
+		"  - rule_id: path-empty\n"+
+		"    owner: harness\n"+
+		"    category: state\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: path_exists\n"+
+		"  - rule_id: contains-empty\n"+
+		"    owner: harness\n"+
+		"    category: state\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: file_contains\n"+
+		"      path: AGENTS.md\n"+
+		"  - rule_id: field-empty\n"+
+		"    owner: harness\n"+
+		"    category: views\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: frontmatter_field_present\n"+
+		"      path: docs/views/briefs/repo_health_brief.md\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := withCheckWD(t, repo, func() int {
+		return Run([]string{"run", "--json"}, &stdout, &stderr, nil)
+	})
+	if exit != 1 {
+		t.Fatalf("run exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Data struct {
+			Issues []struct {
+				Code string `json:"code"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	for _, code := range []string{"policy-rule-check-path-missing", "policy-rule-check-contains-missing", "policy-rule-check-field-missing"} {
+		if !hasCode(payload.Data.Issues, code) {
+			t.Fatalf("expected %s issue: %s", code, stdout.String())
+		}
 	}
 }
 
@@ -153,10 +278,82 @@ func TestCheckRunEvaluatesStateDualReadParityRule(t *testing.T) {
 	}
 }
 
+func TestCheckRunEvaluatesStateProjectionSourceIntegrity(t *testing.T) {
+	repo := makeRealGitCheckRepo(t)
+	configureTopicLayerCheckRepo(t, repo)
+	statusPath := filepath.Join(repo, "project_progress", "Tooling", "tasks", "active", "0062_hard_cut", "status.yaml")
+	cardPath := filepath.Join(repo, "project_progress", "Tooling", "tasks", "active", "0062_hard_cut.md")
+	statusContent := "task:\n  id: 0062_hard_cut\n  lifecycle: active\n"
+	cardContent := "# 0062 Hard Cut\n"
+	writeCheckFile(t, statusPath, statusContent)
+	writeCheckFile(t, cardPath, cardContent)
+	runCheckGit(t, repo, "add", "AGENTS.md", "anton.yaml", "project_progress")
+	runCheckGit(t, repo, "-c", "user.email=anton@example.com", "-c", "user.name=Anton Test", "commit", "-m", "seed legacy state")
+	head := strings.TrimSpace(runCheckGit(t, repo, "rev-parse", "HEAD"))
+
+	writeCheckFile(t, filepath.Join(repo, "docs", "state", "tasks", "Tooling", "0062_hard_cut.yaml"), ""+
+		"task_id: 0062_hard_cut\n"+
+		"topic: Tooling\n"+
+		"active: true\n"+
+		"lifecycle: active\n"+
+		"truth_location: project_progress/Tooling/tasks/active/0062_hard_cut/status.yaml\n"+
+		"legacy_card: project_progress/Tooling/tasks/active/0062_hard_cut.md\n"+
+		"source_commit: "+head+"\n"+
+		"source_status_sha256: 0000000000000000000000000000000000000000000000000000000000000000\n"+
+		"source_card_sha256: "+testSHA256(cardContent)+"\n"+
+		"workspace:\n"+
+		"  path: "+repo+"\n"+
+		"  head: 1111111111111111111111111111111111111111\n"+
+		"  head_status: live_git_head\n")
+	writeCheckFile(t, filepath.Join(repo, "docs", "agent-workflow", "registries", "checks.yaml"), ""+
+		"rules:\n"+
+		"  - rule_id: state-projection-source-integrity\n"+
+		"    owner: harness\n"+
+		"    category: state\n"+
+		"    severity: error\n"+
+		"    check:\n"+
+		"      kind: state_projection_source_integrity\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := withCheckWD(t, repo, func() int {
+		return Run([]string{"run", "--json"}, &stdout, &stderr, nil)
+	})
+	if exit != 1 {
+		t.Fatalf("run exit = %d stdout=%s stderr=%s", exit, stdout.String(), stderr.String())
+	}
+	var payload struct {
+		Data struct {
+			Issues []struct {
+				RuleID string `json:"rule_id"`
+				Code   string `json:"code"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !hasCheckIssue(payload.Data.Issues, "state-projection-source-integrity", "state-projection-status-hash-mismatch") {
+		t.Fatalf("expected source status hash mismatch: %s", stdout.String())
+	}
+	if !hasCheckIssue(payload.Data.Issues, "state-projection-source-integrity", "state-projection-workspace-head-stale") {
+		t.Fatalf("expected workspace head stale issue: %s", stdout.String())
+	}
+}
+
 func makeCheckRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeCheckFile(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeCheckFile(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
+	writeCheckFile(t, filepath.Join(root, "anton.yaml"), "version: 1\nentrypoint:\n  path: AGENTS.md\ntasks:\n  root: .anton/tasks\nthreads:\n  default_project_strategy: repo-root\n")
+	return root
+}
+
+func makeRealGitCheckRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	runCheckGit(t, root, "init")
 	writeCheckFile(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
 	writeCheckFile(t, filepath.Join(root, "anton.yaml"), "version: 1\nentrypoint:\n  path: AGENTS.md\ntasks:\n  root: .anton/tasks\nthreads:\n  default_project_strategy: repo-root\n")
 	return root
@@ -181,6 +378,22 @@ func writeCheckFile(t *testing.T, path string, content string) {
 	}
 }
 
+func runCheckGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
+}
+
+func testSHA256(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", sum[:])
+}
+
 func withCheckWD(t *testing.T, dir string, fn func() int) int {
 	t.Helper()
 	original, err := os.Getwd()
@@ -202,6 +415,17 @@ func hasCheckIssue(issues []struct {
 }, ruleID string, code string) bool {
 	for _, issue := range issues {
 		if issue.RuleID == ruleID && issue.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCode(issues []struct {
+	Code string `json:"code"`
+}, code string) bool {
+	for _, issue := range issues {
+		if issue.Code == code {
 			return true
 		}
 	}

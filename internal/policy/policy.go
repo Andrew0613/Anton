@@ -32,6 +32,8 @@ type CheckSpec struct {
 	Kind     string `json:"kind" yaml:"kind"`
 	Path     string `json:"path,omitempty" yaml:"path"`
 	Contains string `json:"contains,omitempty" yaml:"contains"`
+	Field    string `json:"field,omitempty" yaml:"field"`
+	Equals   string `json:"equals,omitempty" yaml:"equals"`
 }
 
 type Issue struct {
@@ -161,6 +163,8 @@ func normalizeRules(rules []Rule) []Rule {
 		rule.Check.Kind = strings.TrimSpace(rule.Check.Kind)
 		rule.Check.Path = strings.TrimSpace(rule.Check.Path)
 		rule.Check.Contains = strings.TrimSpace(rule.Check.Contains)
+		rule.Check.Field = strings.TrimSpace(rule.Check.Field)
+		rule.Check.Equals = strings.TrimSpace(rule.Check.Equals)
 		result = append(result, rule)
 	}
 	return result
@@ -198,9 +202,52 @@ func validateRules(rules []Rule, source string) []Issue {
 		if rule.Severity != "warning" && rule.Severity != "error" {
 			issues = append(issues, Issue{Level: "error", Code: "policy-rule-severity-invalid", File: source, Message: fmt.Sprintf("%s: severity must be warning or error", label), RepairHint: "set severity to warning or error"})
 		}
-		if rule.Check.Kind == "" && rule.PlannedSurface == "" {
+		if rule.Check.Kind == "" {
 			issues = append(issues, Issue{Level: "error", Code: "policy-rule-kind-missing", File: source, Message: fmt.Sprintf("%s: check.kind is required", label), RepairHint: "set check.kind"})
+		} else {
+			issues = append(issues, validateCheckSpec(rule, label, source)...)
 		}
+	}
+	return issues
+}
+
+func validateCheckSpec(rule Rule, label string, source string) []Issue {
+	issues := []Issue{}
+	requirePath := func() {
+		if rule.Check.Path == "" {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-path-missing", File: source, Message: fmt.Sprintf("%s: check.path is required for %s", label, rule.Check.Kind), RepairHint: "set check.path"})
+		}
+	}
+	requireContains := func() {
+		if rule.Check.Contains == "" {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-contains-missing", File: source, Message: fmt.Sprintf("%s: check.contains is required for %s", label, rule.Check.Kind), RepairHint: "set check.contains"})
+		}
+	}
+	requireField := func() {
+		if rule.Check.Field == "" {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-field-missing", File: source, Message: fmt.Sprintf("%s: check.field is required for %s", label, rule.Check.Kind), RepairHint: "set check.field"})
+		}
+	}
+	requireEquals := func() {
+		if rule.Check.Equals == "" {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-equals-missing", File: source, Message: fmt.Sprintf("%s: check.equals is required for %s", label, rule.Check.Kind), RepairHint: "set check.equals"})
+		}
+	}
+	switch rule.Check.Kind {
+	case "path_exists", "path_missing":
+		requirePath()
+	case "file_contains":
+		requirePath()
+		requireContains()
+	case "yaml_field_equals", "yaml_all_fields_equal", "frontmatter_field_equals":
+		requirePath()
+		requireField()
+		requireEquals()
+	case "frontmatter_field_present":
+		requirePath()
+		requireField()
+	case "state_dual_read_parity", "state_projection_source_integrity":
+	default:
 	}
 	return issues
 }

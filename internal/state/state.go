@@ -13,24 +13,29 @@ import (
 )
 
 type TaskRecord struct {
-	TaskID          string           `json:"task_id" yaml:"task_id"`
-	Topic           string           `json:"topic,omitempty" yaml:"topic"`
-	Lane            string           `json:"lane,omitempty" yaml:"lane"`
-	Lifecycle       string           `json:"lifecycle" yaml:"lifecycle"`
-	TruthLocation   string           `json:"truth_location,omitempty" yaml:"truth_location"`
-	Workspace       WorkspaceBinding `json:"workspace,omitempty" yaml:"workspace"`
-	SourceRevision  string           `json:"source_revision,omitempty" yaml:"source_revision"`
-	Freshness       Freshness        `json:"freshness,omitempty" yaml:"freshness"`
-	Blockers        []string         `json:"blockers,omitempty" yaml:"blockers"`
-	CloseoutAllowed bool             `json:"closeout_allowed,omitempty" yaml:"closeout_allowed"`
-	Active          bool             `json:"active,omitempty" yaml:"active"`
-	SourceFile      string           `json:"source_file"`
+	TaskID             string           `json:"task_id" yaml:"task_id"`
+	Topic              string           `json:"topic,omitempty" yaml:"topic"`
+	Lane               string           `json:"lane,omitempty" yaml:"lane"`
+	Lifecycle          string           `json:"lifecycle" yaml:"lifecycle"`
+	TruthLocation      string           `json:"truth_location,omitempty" yaml:"truth_location"`
+	LegacyCard         string           `json:"legacy_card,omitempty" yaml:"legacy_card"`
+	Workspace          WorkspaceBinding `json:"workspace,omitempty" yaml:"workspace"`
+	SourceRevision     string           `json:"source_revision,omitempty" yaml:"source_revision"`
+	SourceCommit       string           `json:"source_commit,omitempty" yaml:"source_commit"`
+	SourceStatusSHA256 string           `json:"source_status_sha256,omitempty" yaml:"source_status_sha256"`
+	SourceCardSHA256   string           `json:"source_card_sha256,omitempty" yaml:"source_card_sha256"`
+	Freshness          Freshness        `json:"freshness,omitempty" yaml:"freshness"`
+	Blockers           []string         `json:"blockers,omitempty" yaml:"blockers"`
+	CloseoutAllowed    bool             `json:"closeout_allowed,omitempty" yaml:"closeout_allowed"`
+	Active             bool             `json:"active,omitempty" yaml:"active"`
+	SourceFile         string           `json:"source_file"`
 }
 
 type WorkspaceBinding struct {
-	Path   string `json:"path,omitempty" yaml:"path"`
-	Branch string `json:"branch,omitempty" yaml:"branch"`
-	Head   string `json:"head,omitempty" yaml:"head"`
+	Path       string `json:"path,omitempty" yaml:"path"`
+	Branch     string `json:"branch,omitempty" yaml:"branch"`
+	Head       string `json:"head,omitempty" yaml:"head"`
+	HeadStatus string `json:"head_status,omitempty" yaml:"head_status"`
 }
 
 type Freshness struct {

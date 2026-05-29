@@ -1,10 +1,14 @@
 package workspace
 
 import (
+	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
 	"github.com/Andrew0613/Anton/internal/artifact"
@@ -29,6 +33,7 @@ type CockpitSummary struct {
 	ResultHeavyCount     int    `json:"result_heavy_count"`
 	CleanupReadyCount    int    `json:"cleanup_ready_count"`
 	SplitBrainCount      int    `json:"split_brain_count"`
+	InspectionBlocked    int    `json:"inspection_blocked_count"`
 	LockedAttentionCount int    `json:"locked_attention_count"`
 }
 
@@ -56,6 +61,11 @@ func BuildCockpit(environ []string) (CockpitReport, error) {
 	if repoRoot == "" {
 		repoRoot = resolved.Context.WorkingDirectory
 	}
+	currentRoot := strings.TrimSpace(gitCommand(wd, "rev-parse", "--show-toplevel"))
+	if currentRoot == "" {
+		currentRoot = wd
+	}
+	currentRoot = filepath.Clean(currentRoot)
 	paths := workspacePaths(repoRoot)
 	inventory, _ := state.LoadInventory(resolved, false)
 	activeByPath := map[string]bool{}
@@ -63,11 +73,11 @@ func BuildCockpit(environ []string) (CockpitReport, error) {
 		if strings.TrimSpace(item.Workspace.Path) == "" {
 			continue
 		}
-		activeByPath[filepath.Clean(filepath.Join(repoRoot, item.Workspace.Path))] = true
+		activeByPath[normalizeWorkspacePath(repoRoot, item.Workspace.Path)] = true
 	}
 	workspaces := make([]CockpitWorkspace, 0, len(paths))
 	for _, path := range paths {
-		workspaces = append(workspaces, inspectWorkspace(path, repoRoot, wd, activeByPath))
+		workspaces = append(workspaces, inspectWorkspace(path, repoRoot, currentRoot, activeByPath))
 	}
 	report := CockpitReport{
 		Adapter:          resolved.Definition.Name(),
@@ -90,13 +100,51 @@ func BuildCockpit(environ []string) (CockpitReport, error) {
 }
 
 func workspacePaths(repoRoot string) []string {
-	paths := []string{filepath.Clean(repoRoot)}
-	gitWorktrees := filepath.Join(repoRoot, ".git", "worktrees")
-	entries, err := os.ReadDir(gitWorktrees)
-	if err != nil {
+	if paths := gitWorktreeListPaths(repoRoot); len(paths) > 0 {
 		return paths
 	}
+	return metadataWorkspacePaths(repoRoot)
+}
+
+func gitWorktreeListPaths(repoRoot string) []string {
+	output := gitCommand(repoRoot, "worktree", "list", "--porcelain")
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+	paths := []string{}
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "worktree ") {
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		if path != "" {
+			paths = append(paths, filepath.Clean(path))
+		}
+	}
+	return uniqueSortedPaths(paths)
+}
+
+func metadataWorkspacePaths(repoRoot string) []string {
+	paths := []string{filepath.Clean(repoRoot)}
+	gitDir := resolveGitDirForRefs(repoRoot)
+	if gitDir == "" {
+		return uniqueSortedPaths(paths)
+	}
+	commonDir := resolveCommonGitDir(gitDir)
+	if filepath.Base(commonDir) == ".git" {
+		paths = append(paths, filepath.Clean(filepath.Dir(commonDir)))
+	}
+	gitWorktrees := filepath.Join(commonDir, "worktrees")
+	entries, err := os.ReadDir(gitWorktrees)
+	if err != nil {
+		return uniqueSortedPaths(paths)
+	}
 	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
 		gitdirPath := filepath.Join(gitWorktrees, entry.Name(), "gitdir")
 		content, err := os.ReadFile(gitdirPath)
 		if err != nil {
@@ -112,20 +160,32 @@ func workspacePaths(repoRoot string) []string {
 		workspacePath := filepath.Dir(worktreeGit)
 		paths = append(paths, filepath.Clean(workspacePath))
 	}
-	return paths
+	return uniqueSortedPaths(paths)
 }
 
 func inspectWorkspace(path string, repoRoot string, currentWD string, activeByPath map[string]bool) CockpitWorkspace {
+	path = filepath.Clean(path)
+	current := path == filepath.Clean(currentWD)
 	branch := strings.TrimSpace(gitCommand(path, "rev-parse", "--abbrev-ref", "HEAD"))
-	dirty := strings.TrimSpace(gitCommand(path, "status", "--porcelain")) != ""
-	locked := statFile(filepath.Join(path, ".git", "index.lock"))
+	statusOutput, statusOK := gitCommandStatus(path, "status", "--porcelain")
+	dirty := strings.TrimSpace(statusOutput) != ""
+	locked := statFile(indexLockPath(path))
 	footprint := artifact.ScanResultFootprint(path)
 	classification := "stale_clean"
 	action := "keep"
 	switch {
+	case current:
+		classification = "active_truth"
+		action = "preserve-and-continue"
+	case activeByPath[path]:
+		classification = "active_truth"
+		action = "preserve-and-continue"
 	case locked:
 		classification = "locked_attention"
 		action = "resolve-lock-before-cleanup"
+	case !statusOK:
+		classification = "inspection_blocked"
+		action = "inspect-before-cleanup"
 	case footprint.FileCount > 0:
 		classification = "result_persist_required"
 		action = "record-artifact-retention-before-cleanup"
@@ -144,9 +204,6 @@ func inspectWorkspace(path string, repoRoot string, currentWD string, activeByPa
 	case strings.HasPrefix(branch, "archive/"):
 		classification = "archive_candidate"
 		action = "archive-or-prune"
-	case activeByPath[path]:
-		classification = "active_truth"
-		action = "preserve-and-continue"
 	default:
 		classification = "cleanup_ready"
 		action = "cleanup_ready"
@@ -154,13 +211,44 @@ func inspectWorkspace(path string, repoRoot string, currentWD string, activeByPa
 	return CockpitWorkspace{
 		Path:              path,
 		Branch:            branch,
-		Current:           filepath.Clean(path) == filepath.Clean(currentWD) || strings.HasPrefix(filepath.Clean(currentWD), filepath.Clean(path)+string(filepath.Separator)),
+		Current:           current,
 		Dirty:             dirty,
 		Locked:            locked,
 		Classification:    classification,
 		RecommendedAction: action,
 		ResultFootprint:   footprint,
 	}
+}
+
+func normalizeWorkspacePath(repoRoot string, path string) string {
+	path = strings.TrimSpace(path)
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(repoRoot, path))
+}
+
+func uniqueSortedPaths(paths []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, path := range paths {
+		path = filepath.Clean(path)
+		if path == "." || path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func indexLockPath(path string) string {
+	gitDir := resolveGitDirForRefs(path)
+	if gitDir == "" {
+		return filepath.Join(path, ".git", "index.lock")
+	}
+	return filepath.Join(gitDir, "index.lock")
 }
 
 func summarizeCockpit(workspaces []CockpitWorkspace, findings []finding) CockpitSummary {
@@ -178,8 +266,14 @@ func summarizeCockpit(workspaces []CockpitWorkspace, findings []finding) Cockpit
 		if item.Classification == "cleanup_ready" || item.Classification == "landed_clean" {
 			result.CleanupReadyCount++
 		}
-		if item.Classification == "locked_attention" {
+		if item.Locked {
 			result.LockedAttentionCount++
+		}
+		if item.Classification == "locked_attention" {
+			result.Status = "blocked"
+		}
+		if item.Classification == "inspection_blocked" {
+			result.InspectionBlocked++
 			result.Status = "blocked"
 		}
 	}
@@ -198,12 +292,23 @@ func summarizeCockpit(workspaces []CockpitWorkspace, findings []finding) Cockpit
 }
 
 func gitCommand(path string, args ...string) string {
-	command := exec.Command("git", append([]string{"-C", path}, args...)...)
+	output, _ := gitCommandStatus(path, args...)
+	return output
+}
+
+func gitCommandStatus(path string, args ...string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, args...)...)
+	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	output, err := command.Output()
-	if err != nil {
-		return ""
+	if ctx.Err() != nil {
+		return "", false
 	}
-	return string(output)
+	if err != nil {
+		return "", false
+	}
+	return string(output), true
 }
 
 func statFile(path string) bool {

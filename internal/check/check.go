@@ -1,16 +1,21 @@
 package check
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
 	"github.com/Andrew0613/Anton/internal/policy"
 	"github.com/Andrew0613/Anton/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 type options struct {
@@ -209,6 +214,10 @@ func collect(environ []string) (runData, error) {
 			}
 			continue
 		}
+		if rule.Check.Kind == "state_projection_source_integrity" {
+			issues = append(issues, evaluateStateProjectionSourceIntegrity(base, rule, inventory.Tasks)...)
+			continue
+		}
 		evaluated, failed := evaluateRule(base, rule)
 		if failed {
 			issues = append(issues, evaluated)
@@ -236,16 +245,7 @@ func collect(environ []string) (runData, error) {
 }
 
 func evaluateRule(base string, rule policy.Rule) (ActionableIssue, bool) {
-	issue := ActionableIssue{
-		RuleID:          rule.RuleID,
-		Owner:           rule.Owner,
-		Category:        rule.Category,
-		Severity:        normalizeSeverity(rule.Severity),
-		CanonicalSource: rule.CanonicalSource,
-		Blocking:        rule.Blocking || normalizeSeverity(rule.Severity) == "error",
-		Autofix:         rule.Autofix,
-		SafeCommand:     rule.SafeCommand,
-	}
+	issue := actionableIssueFromRule(rule)
 	target := filepath.Clean(filepath.Join(base, rule.Check.Path))
 	switch rule.Check.Kind {
 	case "path_exists":
@@ -267,6 +267,34 @@ func evaluateRule(base string, rule policy.Rule) (ActionableIssue, bool) {
 		}
 		issue.Code = "file-content-mismatch"
 		issue.Message = fmt.Sprintf("file %s does not contain required token", rule.Check.Path)
+	case "yaml_field_equals":
+		values, err := yamlFieldValues(target, rule.Check.Field, false)
+		if err == nil && len(values) == 1 && values[0] == rule.Check.Equals {
+			return issue, false
+		}
+		issue.Code = "yaml-field-mismatch"
+		issue.Message = fmt.Sprintf("YAML field %s in %s does not equal %q", rule.Check.Field, rule.Check.Path, rule.Check.Equals)
+	case "yaml_all_fields_equal":
+		values, err := yamlFieldValues(target, rule.Check.Field, true)
+		if err == nil && len(values) > 0 && allEqual(values, rule.Check.Equals) {
+			return issue, false
+		}
+		issue.Code = "yaml-field-mismatch"
+		issue.Message = fmt.Sprintf("not all YAML field values %s in %s equal %q", rule.Check.Field, rule.Check.Path, rule.Check.Equals)
+	case "frontmatter_field_present":
+		values, err := frontmatterFieldValues(target, rule.Check.Field)
+		if err == nil && len(values) == 1 && strings.TrimSpace(values[0]) != "" {
+			return issue, false
+		}
+		issue.Code = "frontmatter-field-missing"
+		issue.Message = fmt.Sprintf("frontmatter field %s in %s is missing or empty", rule.Check.Field, rule.Check.Path)
+	case "frontmatter_field_equals":
+		values, err := frontmatterFieldValues(target, rule.Check.Field)
+		if err == nil && len(values) == 1 && values[0] == rule.Check.Equals {
+			return issue, false
+		}
+		issue.Code = "frontmatter-field-mismatch"
+		issue.Message = fmt.Sprintf("frontmatter field %s in %s does not equal %q", rule.Check.Field, rule.Check.Path, rule.Check.Equals)
 	default:
 		issue.Code = "unsupported-rule-kind"
 		issue.Message = fmt.Sprintf("unsupported policy check.kind %q", rule.Check.Kind)
@@ -275,6 +303,289 @@ func evaluateRule(base string, rule policy.Rule) (ActionableIssue, bool) {
 	}
 	issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
 	return issue, true
+}
+
+func evaluateStateProjectionSourceIntegrity(base string, rule policy.Rule, tasks []state.TaskRecord) []ActionableIssue {
+	issues := []ActionableIssue{}
+	for _, task := range tasks {
+		source := taskSourceFields(task)
+		if source.Commit == "" {
+			issues = append(issues, taskProjectionIssue(rule, task, "state-projection-source-commit-missing", fmt.Sprintf("task %s projection has no source_commit", task.TaskID)))
+		}
+		if task.TruthLocation != "" || source.StatusSHA256 != "" {
+			issues = append(issues, compareProjectedSourceHash(base, rule, task, source.Commit, task.TruthLocation, source.StatusSHA256, "status")...)
+		}
+		if task.LegacyCard != "" || source.CardSHA256 != "" {
+			issues = append(issues, compareProjectedSourceHash(base, rule, task, source.Commit, task.LegacyCard, source.CardSHA256, "card")...)
+		}
+		if strings.TrimSpace(task.Workspace.Path) != "" {
+			issues = append(issues, compareProjectedWorkspaceHead(rule, task)...)
+		}
+	}
+	return issues
+}
+
+type taskSource struct {
+	Commit       string
+	StatusSHA256 string
+	CardSHA256   string
+}
+
+func taskSourceFields(task state.TaskRecord) taskSource {
+	source := taskSource{
+		Commit:       strings.TrimSpace(task.SourceCommit),
+		StatusSHA256: strings.TrimSpace(task.SourceStatusSHA256),
+		CardSHA256:   strings.TrimSpace(task.SourceCardSHA256),
+	}
+	for _, part := range strings.Split(task.SourceRevision, ";") {
+		part = strings.TrimSpace(part)
+		switch {
+		case source.Commit == "" && strings.HasPrefix(part, "git:"):
+			source.Commit = strings.TrimSpace(strings.TrimPrefix(part, "git:"))
+		case source.StatusSHA256 == "" && strings.HasPrefix(part, "status_sha256:"):
+			source.StatusSHA256 = strings.TrimSpace(strings.TrimPrefix(part, "status_sha256:"))
+		case source.CardSHA256 == "" && strings.HasPrefix(part, "card_sha256:"):
+			source.CardSHA256 = strings.TrimSpace(strings.TrimPrefix(part, "card_sha256:"))
+		}
+	}
+	return source
+}
+
+func compareProjectedSourceHash(base string, rule policy.Rule, task state.TaskRecord, commit string, path string, expected string, label string) []ActionableIssue {
+	if strings.TrimSpace(path) == "" {
+		return []ActionableIssue{taskProjectionIssue(rule, task, fmt.Sprintf("state-projection-%s-path-missing", label), fmt.Sprintf("task %s projection has %s hash but no %s path", task.TaskID, label, label))}
+	}
+	if strings.TrimSpace(expected) == "" {
+		return []ActionableIssue{taskProjectionIssue(rule, task, fmt.Sprintf("state-projection-%s-hash-missing", label), fmt.Sprintf("task %s projection has %s path but no %s SHA256", task.TaskID, label, label))}
+	}
+	if strings.TrimSpace(commit) == "" {
+		return nil
+	}
+	actual, err := gitBlobSHA256(base, commit, path)
+	if err != nil {
+		return []ActionableIssue{taskProjectionIssue(rule, task, fmt.Sprintf("state-projection-%s-source-unreadable", label), fmt.Sprintf("task %s projection cannot read %s %s at %s: %v", task.TaskID, label, path, commit, err))}
+	}
+	if actual != strings.TrimSpace(expected) {
+		return []ActionableIssue{taskProjectionIssue(rule, task, fmt.Sprintf("state-projection-%s-hash-mismatch", label), fmt.Sprintf("task %s projection %s SHA256 does not match %s at %s", task.TaskID, label, path, commit))}
+	}
+	return nil
+}
+
+func compareProjectedWorkspaceHead(rule policy.Rule, task state.TaskRecord) []ActionableIssue {
+	liveHead, liveStatus := liveGitHead(task.Workspace.Path)
+	projectedHead := strings.TrimSpace(task.Workspace.Head)
+	headStatus := strings.TrimSpace(task.Workspace.HeadStatus)
+	if liveHead != "" {
+		if headStatus != "" && headStatus != "live_git_head" {
+			return nil
+		}
+		if projectedHead == "" {
+			return []ActionableIssue{taskProjectionIssue(rule, task, "state-projection-workspace-head-missing-live", fmt.Sprintf("task %s projection omits workspace.head for live checkout %s", task.TaskID, task.Workspace.Path))}
+		}
+		if projectedHead != liveHead {
+			return []ActionableIssue{taskProjectionIssue(rule, task, "state-projection-workspace-head-stale", fmt.Sprintf("task %s projection workspace.head %s does not match live HEAD %s at %s", task.TaskID, projectedHead, liveHead, task.Workspace.Path))}
+		}
+		return nil
+	}
+	if headStatus != "" && headStatus != "live_git_head" {
+		return nil
+	}
+	if projectedHead != "" {
+		return []ActionableIssue{taskProjectionIssue(rule, task, "state-projection-workspace-head-nonlive", fmt.Sprintf("task %s projection has workspace.head for non-live workspace %s (%s)", task.TaskID, task.Workspace.Path, liveStatus))}
+	}
+	if headStatus == "" || headStatus == "live_git_head" {
+		return []ActionableIssue{taskProjectionIssue(rule, task, "state-projection-workspace-head-status-missing", fmt.Sprintf("task %s projection does not explain non-live workspace %s (%s)", task.TaskID, task.Workspace.Path, liveStatus))}
+	}
+	return nil
+}
+
+func taskProjectionIssue(rule policy.Rule, task state.TaskRecord, code string, message string) ActionableIssue {
+	issue := actionableIssueFromRule(rule)
+	issue.Code = code
+	issue.Message = message
+	issue.CanonicalSource = task.SourceFile
+	issue.Bucket = chooseBucket(issue, false)
+	return issue
+}
+
+func gitBlobSHA256(base string, commit string, path string) (string, error) {
+	relative, err := repoRelativePath(base, path)
+	if err != nil {
+		return "", err
+	}
+	output, err := gitOutput(base, 3*time.Second, "show", fmt.Sprintf("%s:%s", commit, filepath.ToSlash(relative)))
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(output))
+	return fmt.Sprintf("%x", sum[:]), nil
+}
+
+func repoRelativePath(base string, path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if filepath.IsAbs(path) {
+		relative, err := filepath.Rel(base, path)
+		if err != nil {
+			return "", err
+		}
+		path = relative
+	}
+	cleaned := filepath.Clean(path)
+	if cleaned == "." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || cleaned == ".." {
+		return "", fmt.Errorf("path %q is outside repository root", path)
+	}
+	return cleaned, nil
+}
+
+func liveGitHead(path string) (string, string) {
+	if statDir(path) {
+		output, err := gitOutput(path, 2*time.Second, "rev-parse", "HEAD")
+		if err == nil && strings.TrimSpace(output) != "" {
+			return strings.TrimSpace(output), "live_git_head"
+		}
+		if err != nil && strings.Contains(err.Error(), "timeout") {
+			return "", "head_probe_timeout"
+		}
+		return "", "not_git_checkout"
+	}
+	return "", "workspace_missing"
+}
+
+func gitOutput(dir string, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	output, err := command.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("git %s timeout", strings.Join(args, " "))
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+func actionableIssueFromRule(rule policy.Rule) ActionableIssue {
+	return ActionableIssue{
+		RuleID:          rule.RuleID,
+		Owner:           rule.Owner,
+		Category:        rule.Category,
+		Severity:        normalizeSeverity(rule.Severity),
+		CanonicalSource: rule.CanonicalSource,
+		Blocking:        rule.Blocking || normalizeSeverity(rule.Severity) == "error",
+		Autofix:         rule.Autofix,
+		SafeCommand:     rule.SafeCommand,
+	}
+}
+
+func yamlFieldValues(path string, field string, allowWildcard bool) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var document any
+	if err := yaml.Unmarshal(content, &document); err != nil {
+		return nil, err
+	}
+	return fieldValues(document, strings.Split(field, "."), allowWildcard), nil
+}
+
+func frontmatterFieldValues(path string, field string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	frontmatter, ok := extractFrontmatter(string(content))
+	if !ok {
+		return nil, fmt.Errorf("frontmatter missing")
+	}
+	var document any
+	if err := yaml.Unmarshal([]byte(frontmatter), &document); err != nil {
+		return nil, err
+	}
+	return fieldValues(document, strings.Split(field, "."), false), nil
+}
+
+func extractFrontmatter(content string) (string, bool) {
+	content = strings.TrimPrefix(content, "\ufeff")
+	if !strings.HasPrefix(content, "---\n") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(content, "---\n")
+	index := strings.Index(rest, "\n---")
+	if index < 0 {
+		return "", false
+	}
+	return rest[:index], true
+}
+
+func fieldValues(value any, parts []string, allowWildcard bool) []string {
+	if len(parts) == 0 || (len(parts) == 1 && strings.TrimSpace(parts[0]) == "") {
+		return []string{scalarString(value)}
+	}
+	head := parts[0]
+	tail := parts[1:]
+	if head == "*" && allowWildcard {
+		result := []string{}
+		for _, item := range asSlice(value) {
+			result = append(result, fieldValues(item, tail, allowWildcard)...)
+		}
+		return result
+	}
+	item, ok := asMap(value)[head]
+	if !ok {
+		return nil
+	}
+	return fieldValues(item, tail, allowWildcard)
+}
+
+func asMap(value any) map[string]any {
+	result := map[string]any{}
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[any]any:
+		for key, item := range typed {
+			result[fmt.Sprint(key)] = item
+		}
+	}
+	return result
+}
+
+func asSlice(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	default:
+		return nil
+	}
+}
+
+func scalarString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func allEqual(values []string, expected string) bool {
+	for _, value := range values {
+		if value != expected {
+			return false
+		}
+	}
+	return true
 }
 
 func issueFromPolicy(item policy.Issue) ActionableIssue {
@@ -393,6 +704,11 @@ func normalizeSeverity(value string) string {
 func statPath(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func statDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func fallback(value string, defaultValue string) string {

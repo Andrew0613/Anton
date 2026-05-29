@@ -154,8 +154,79 @@ func TestWorkspaceCleanupPlanClassifiesResultPersistence(t *testing.T) {
 	if payload.Data == nil || payload.Data.Cockpit == nil || len(payload.Data.Cockpit.Workspaces) == 0 {
 		t.Fatalf("payload = %+v", payload)
 	}
-	if payload.Data.Cockpit.Workspaces[0].Classification != "result_persist_required" {
+	if payload.Data.Cockpit.Workspaces[0].Classification != "active_truth" {
 		t.Fatalf("classification = %s payload=%s", payload.Data.Cockpit.Workspaces[0].Classification, stdout.String())
+	}
+	if payload.Data.Cockpit.Workspaces[0].ResultFootprint.FileCount != 1 {
+		t.Fatalf("result footprint = %+v", payload.Data.Cockpit.Workspaces[0].ResultFootprint)
+	}
+}
+
+func TestWorkspaceCleanupPlanDiscoversLinkedWorktreesAndPreservesCurrentAndActive(t *testing.T) {
+	root := t.TempDir()
+	mainRoot := filepath.Join(root, "main")
+	currentRoot := filepath.Join(root, "wt-current")
+	activeRoot := filepath.Join(root, "wt-active")
+	mainGit := filepath.Join(mainRoot, ".git")
+	currentGit := filepath.Join(mainGit, "worktrees", "wt-current")
+	activeGit := filepath.Join(mainGit, "worktrees", "wt-active")
+
+	writeFile(t, filepath.Join(mainGit, "HEAD"), "ref: refs/heads/main\n")
+	writeFile(t, filepath.Join(currentGit, "HEAD"), "ref: refs/heads/task/current\n")
+	writeFile(t, filepath.Join(currentGit, "commondir"), "../..\n")
+	writeFile(t, filepath.Join(currentGit, "gitdir"), filepath.Join(currentRoot, ".git")+"\n")
+	writeFile(t, filepath.Join(activeGit, "HEAD"), "ref: refs/heads/task/active\n")
+	writeFile(t, filepath.Join(activeGit, "commondir"), "../..\n")
+	writeFile(t, filepath.Join(activeGit, "gitdir"), filepath.Join(activeRoot, ".git")+"\n")
+	writeFile(t, filepath.Join(currentGit, "index.lock"), "")
+	writeFile(t, filepath.Join(activeGit, "index.lock"), "")
+	writeFile(t, filepath.Join(currentRoot, ".git"), "gitdir: "+currentGit+"\n")
+	writeFile(t, filepath.Join(activeRoot, ".git"), "gitdir: "+activeGit+"\n")
+	writeFile(t, filepath.Join(currentRoot, "AGENTS.md"), "# Agents\n")
+	writeFile(t, filepath.Join(currentRoot, "anton.yaml"), "version: 1\nentrypoint:\n  path: AGENTS.md\ntasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: physedit-v1\nthreads:\n  default_project_strategy: repo-root\n")
+	writeFile(t, filepath.Join(currentRoot, "docs", "state", "tasks", "active.yaml"), ""+
+		"task_id: active\n"+
+		"topic: Tooling\n"+
+		"lifecycle: active\n"+
+		"workspace:\n  path: "+activeRoot+"\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, currentRoot, func() int {
+		return Run([]string{"cleanup-plan", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	payload := decodeResponse(t, stdout.Bytes())
+	if payload.Data == nil || payload.Data.Cockpit == nil {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Data.Cockpit.Summary.WorkspaceCount != 3 {
+		t.Fatalf("workspace count = %d payload=%s", payload.Data.Cockpit.Summary.WorkspaceCount, stdout.String())
+	}
+	byPath := map[string]CockpitWorkspace{}
+	for _, workspace := range payload.Data.Cockpit.Workspaces {
+		byPath[workspace.Path] = workspace
+	}
+	if current := byPath[filepath.Clean(currentRoot)]; !current.Current || !current.Locked || current.Classification != "active_truth" || current.RecommendedAction == "cleanup_ready" {
+		t.Fatalf("current workspace = %+v", current)
+	}
+	if active := byPath[filepath.Clean(activeRoot)]; active.Current || !active.Locked || active.Classification != "active_truth" || active.RecommendedAction == "cleanup_ready" {
+		t.Fatalf("active workspace = %+v", active)
+	}
+}
+
+func TestWorkspaceInspectBlocksUninspectableWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "not-a-git-worktree")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	workspace := inspectWorkspace(workspaceRoot, root, filepath.Join(root, "other"), map[string]bool{})
+	if workspace.Classification != "inspection_blocked" || workspace.RecommendedAction == "cleanup_ready" {
+		t.Fatalf("workspace = %+v", workspace)
 	}
 }
 
