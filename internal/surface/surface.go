@@ -43,7 +43,7 @@ func CommandSurface() []CommandProbe {
 		{Command: "check", Usage: "anton check <run|repair-plan> [--json]", JSONSupport: true},
 		{Command: "entrypoint", Usage: "anton entrypoint check [--json]", JSONSupport: true},
 		{Command: "workspace", Usage: "anton workspace <inspect|check|refs|list|doctor|cleanup-plan> [--json]", JSONSupport: true},
-		{Command: "migrate", Usage: "anton migrate <plan|readiness> [--json]", JSONSupport: true},
+		{Command: "migrate", Usage: "anton migrate <plan|readiness|project-progress> [--json]", JSONSupport: true},
 		{Command: "version", Usage: "anton version [--json]", JSONSupport: true},
 	}
 }
@@ -71,6 +71,10 @@ func ConfigFieldPaths() []string {
 		"roots.archive",
 		"roots.views",
 		"roots.policy_registry",
+		"migrate.target_schema.version",
+		"migrate.target_schema.locked",
+		"migrate.target_schema.reason",
+		"migrate.default_target",
 		"extensions.history.work_record_roots",
 	}
 }
