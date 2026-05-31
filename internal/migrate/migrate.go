@@ -123,19 +123,79 @@ func runPlan(args []string, stdout io.Writer, stderr io.Writer, environ []string
 	if err != nil {
 		return writeError("migrate plan", "migrate-plan-failed", err.Error(), opts.JSON, stdout, stderr, 1)
 	}
-	reason := "v2 config schema is not locked"
+	targetSchema := schema{
+		Version: resolved.Config.MigrateTargetSchemaVersion(),
+		Locked:  resolved.Config.MigrateTargetSchemaLocked(),
+		Reason:  resolved.Config.MigrateTargetSchemaReason(),
+	}
+	if !targetSchema.Locked {
+		data := commandData{
+			Adapter:          resolved.Definition.Name(),
+			WorkingDirectory: wd,
+			ConfigPath:       resolved.Config.Path,
+			ConfigSource:     resolved.Config.Source(),
+			TargetSchema:     &targetSchema,
+			Status:           "blocked",
+			BlockedReason:    targetSchema.Reason + "; migrate plan must not invent target fields",
+			ProposedChanges:  []string{},
+			ReadOnly:         true,
+		}
+		return writeResponse("migrate plan", data, opts.JSON, stdout, 1)
+	}
+
+	target := strings.TrimSpace(opts.Target)
+	if target == "" {
+		target = resolved.Config.MigrateDefaultTarget()
+	}
+	report, err := workspace.BuildRefsReport(environ, target)
+	if err != nil {
+		return writeError("migrate plan", "migrate-plan-failed", err.Error(), opts.JSON, stdout, stderr, 1)
+	}
+	blockedReason := ""
+	if report.Summary.Blockers > 0 {
+		blockedReason = "target is not ready for migration; fix blockers before planning file moves"
+	}
+	targetStatus := report.Target
 	data := commandData{
-		Adapter:          resolved.Definition.Name(),
-		WorkingDirectory: wd,
-		ConfigPath:       resolved.Config.Path,
-		ConfigSource:     resolved.Config.Source(),
-		TargetSchema:     &schema{Version: 2, Locked: false, Reason: reason},
-		Status:           "blocked",
-		BlockedReason:    reason + "; migrate plan must not invent target fields",
-		ProposedChanges:  []string{},
+		Adapter:          report.Adapter,
+		WorkingDirectory: report.WorkingDirectory,
+		RepositoryRoot:   report.RepositoryRoot,
+		ConfigPath:       report.ConfigPath,
+		ConfigSource:     report.ConfigSource,
+		TargetSchema:     &targetSchema,
+		Target:           &targetStatus,
+		Refs:             &report,
+		Status:           report.Summary.Status,
+		BlockedReason:    blockedReason,
+		Recommendation:   report.Summary.Recommendation,
+		ProposedChanges:  proposedPlanSteps(report),
 		ReadOnly:         true,
 	}
-	return writeResponse("migrate plan", data, opts.JSON, stdout, 1)
+	exitCode := 0
+	if report.Summary.Blockers > 0 {
+		exitCode = 1
+	}
+	return writeResponse("migrate plan", data, opts.JSON, stdout, exitCode)
+}
+
+func proposedPlanSteps(report workspace.RefsReport) []string {
+	steps := []string{
+		fmt.Sprintf("metadata-only readiness scan for %s", report.Target.Relative),
+		"no file moves are approved by anton migrate plan",
+	}
+	if report.Summary.ReferenceHits > 0 {
+		steps = append(steps, fmt.Sprintf("review %d textual reference(s) before any target move", report.Summary.ReferenceHits))
+	}
+	if report.TaskBundle.TargetOverlaps {
+		steps = append(steps, "preserve or retarget task bundle state before moving the target")
+	}
+	for _, worktree := range report.Worktrees {
+		if worktree.OverlapsTarget && !worktree.Current {
+			steps = append(steps, "coordinate overlapping non-current worktrees before moving the target")
+			break
+		}
+	}
+	return steps
 }
 
 func parseOptions(args []string) (options, error) {
@@ -164,7 +224,7 @@ func writeUsage(stderr io.Writer) int {
 
 func usageText() string {
 	return `Usage:
-  anton migrate plan [--json]
+  anton migrate plan [--target PATH] [--json]
   anton migrate readiness --target PATH [--json]
 `
 }

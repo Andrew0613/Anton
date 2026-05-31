@@ -36,6 +36,47 @@ func TestMigratePlanBlockedUntilV2SchemaLock(t *testing.T) {
 	}
 }
 
+func TestMigratePlanUsesLockedSchemaForReadOnlyTargetPlan(t *testing.T) {
+	repoRoot := makeTempRepo(t)
+	writeConfig(t, repoRoot, ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: .anton/tasks\n"+
+		"threads:\n  default_project_strategy: repo-root\n"+
+		"migrate:\n"+
+		"  target_schema:\n"+
+		"    version: 2\n"+
+		"    locked: true\n"+
+		"  default_target: pkg/target\n")
+	writeFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Agents\n")
+	writeFile(t, filepath.Join(repoRoot, "docs", "move.md"), "Move pkg/target after checking refs.\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"plan", "--json"}, &stdout, &stderr, nil)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\n%s", exitCode, stdout.String())
+	}
+	payload := decodeResponse(t, stdout.Bytes())
+	if !payload.OK || payload.Data == nil || payload.Data.TargetSchema == nil || !payload.Data.TargetSchema.Locked {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Data.Target == nil || payload.Data.Target.Relative != "pkg/target" {
+		t.Fatalf("target = %+v", payload.Data.Target)
+	}
+	if payload.Data.Refs == nil || payload.Data.Refs.Summary.ReferenceHits != 2 {
+		t.Fatalf("refs = %+v", payload.Data.Refs)
+	}
+	if !payload.Data.ReadOnly || len(payload.Data.ProposedChanges) == 0 {
+		t.Fatalf("data = %+v", payload.Data)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestMigratePlanInvalidYAML(t *testing.T) {
 	repoRoot := makeTempRepo(t)
 	writeConfig(t, repoRoot, "version: [\n")

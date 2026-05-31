@@ -12,6 +12,7 @@ type Config struct {
 	Tasks        TasksConfig                  `yaml:"tasks"`
 	Run          RunConfig                    `yaml:"run"`
 	Threads      ThreadsConfig                `yaml:"threads"`
+	Migrate      MigrateConfig                `yaml:"migrate"`
 	Gates        []GateConfig                 `yaml:"gates"`
 	GateProfiles map[string]GateProfileConfig `yaml:"gate_profiles"`
 	Roots        RootsConfig                  `yaml:"roots"`
@@ -43,6 +44,17 @@ type RunConfig struct {
 type ThreadsConfig struct {
 	DefaultProjectStrategy string   `yaml:"default_project_strategy"`
 	WorkspaceRoots         []string `yaml:"workspace_roots"`
+}
+
+type MigrateConfig struct {
+	TargetSchema  MigrateTargetSchemaConfig `yaml:"target_schema"`
+	DefaultTarget string                    `yaml:"default_target"`
+}
+
+type MigrateTargetSchemaConfig struct {
+	Version int    `yaml:"version"`
+	Locked  bool   `yaml:"locked"`
+	Reason  string `yaml:"reason"`
 }
 
 type RootsConfig struct {
@@ -233,6 +245,15 @@ func validateConfig(config Config) error {
 			return fmt.Errorf("anton config threads.workspace_roots[%d] must not be empty", index)
 		}
 	}
+	if config.Migrate.TargetSchema.Version != 0 && config.Migrate.TargetSchema.Version != 2 {
+		return fmt.Errorf("anton config migrate.target_schema.version must be 2")
+	}
+	if config.Migrate.TargetSchema.Locked && config.Migrate.TargetSchema.Version != 2 {
+		return fmt.Errorf("anton config migrate.target_schema.version must be 2 when locked")
+	}
+	if config.Migrate.DefaultTarget != "" && trimString(config.Migrate.DefaultTarget) == "" {
+		return fmt.Errorf("anton config migrate.default_target must not be empty when declared")
+	}
 	if config.Roots.StateRoot != "" && trimString(config.Roots.StateRoot) == "" {
 		return fmt.Errorf("anton config roots.state must not be empty when declared")
 	}
@@ -298,6 +319,36 @@ func normalizedPlanningMode(tasks TasksConfig) string {
 
 func (config Config) PlanningMode() string {
 	return normalizedPlanningMode(config.Tasks)
+}
+
+func (config Config) MigrateTargetSchemaVersion() int {
+	if config.Migrate.TargetSchema.Version == 0 {
+		return 2
+	}
+	return config.Migrate.TargetSchema.Version
+}
+
+func (config Config) MigrateTargetSchemaLocked() bool {
+	return config.Migrate.TargetSchema.Locked
+}
+
+func (config Config) MigrateTargetSchemaReason() string {
+	reason := trimString(config.Migrate.TargetSchema.Reason)
+	if reason != "" {
+		return reason
+	}
+	if config.MigrateTargetSchemaLocked() {
+		return "v2 config schema is locked by anton.yaml"
+	}
+	return "v2 config schema is not locked"
+}
+
+func (config Config) MigrateDefaultTarget() string {
+	value := trimString(config.Migrate.DefaultTarget)
+	if value != "" {
+		return value
+	}
+	return trimString(config.Tasks.Root)
 }
 
 func (config Config) RunManifestName() string {

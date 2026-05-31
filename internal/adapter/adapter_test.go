@@ -208,6 +208,39 @@ func TestLoadConfigAcceptsTypedRoots(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAcceptsMigrateSchemaLock(t *testing.T) {
+	repoRoot := makeTempRepoRoot(t)
+	configPath := filepath.Join(repoRoot, "anton.yaml")
+	content := "" +
+		"version: 1\n" +
+		"entrypoint:\n  path: AGENTS.md\n" +
+		"tasks:\n  root: .anton/tasks\n" +
+		"threads:\n  default_project_strategy: repo-root\n" +
+		"migrate:\n" +
+		"  target_schema:\n" +
+		"    version: 2\n" +
+		"    locked: true\n" +
+		"  default_target: project_progress\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write anton.yaml: %v", err)
+	}
+
+	context, err := DetectContext(repoRoot, nil)
+	if err != nil {
+		t.Fatalf("DetectContext returned error: %v", err)
+	}
+	config, err := LoadConfig(context)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if !config.MigrateTargetSchemaLocked() || config.MigrateTargetSchemaVersion() != 2 {
+		t.Fatalf("migrate config = %#v", config.Migrate)
+	}
+	if config.MigrateDefaultTarget() != "project_progress" {
+		t.Fatalf("migrate default target = %q", config.MigrateDefaultTarget())
+	}
+}
+
 func TestLoadConfigDefaultsTypedRoots(t *testing.T) {
 	context, err := DetectContext(fixturePath(t, "repo-root"), nil)
 	if err != nil {
