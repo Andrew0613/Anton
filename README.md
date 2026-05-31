@@ -384,13 +384,19 @@ anton workspace check [--json]
 anton workspace refs --target PATH [--json]
 anton migrate plan [--target PATH] [--json]
 anton migrate readiness --target PATH [--json]
+anton migrate project-progress --metadata-only --emit-manifest [--target PATH] [--json]
+anton migrate project-progress --apply --approval-marker FILE [--target PATH] [--json]
 ```
 
 These commands are read-only or append-only where noted. `migrate plan` is
 blocked until `anton.yaml` explicitly locks `migrate.target_schema` at version
 `2`; once locked, it emits a metadata-only target plan using the configured
 `migrate.default_target`, the `--target` override, or the task root fallback.
-`migrate readiness` never moves files.
+`migrate readiness` never moves files. `migrate project-progress
+--metadata-only --emit-manifest` emits a bounded manifest with target-surface
+recommendations. `migrate project-progress --apply` still refuses physical
+moves unless and until inventory digest verification, snapshots, and rollback
+behavior are specified.
 
 ### Version
 
