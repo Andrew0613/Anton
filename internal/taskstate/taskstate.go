@@ -21,11 +21,12 @@ const (
 )
 
 var finishStates = map[string]bool{
-	"active":  true,
-	"blocked": true,
-	"review":  true,
-	"partial": true,
-	"done":    true,
+	"active":    true,
+	"blocked":   true,
+	"review":    true,
+	"partial":   true,
+	"done":      true,
+	"completed": true,
 }
 
 type fileResult struct {

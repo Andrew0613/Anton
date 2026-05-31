@@ -109,6 +109,19 @@ func TestSummarizeBlocksOnMissingOrInvalidFiles(t *testing.T) {
 	}
 }
 
+func TestClosureGateAcceptsPhysEditCompletedLifecycle(t *testing.T) {
+	results := closureGateResults("status.yaml", adapter.StatusSnapshot{
+		TaskID:                   "0064_project_progress_retirement_workspace_hygiene",
+		Lifecycle:                "completed",
+		FinishState:              "completed",
+		NextStep:                 "archive compatibility bundle",
+		ExpectedDeliverableCount: 1,
+	})
+	if len(results) != 0 {
+		t.Fatalf("completed lifecycle should be accepted, got %+v", results)
+	}
+}
+
 func TestValidateBundleCompleteFixture(t *testing.T) {
 	bundle := adapter.ResolvedTaskBundle{
 		Root: bundleFixturePath("complete"),
