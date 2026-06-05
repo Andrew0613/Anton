@@ -161,29 +161,72 @@ func runTaskSet(args []string, stdout io.Writer, stderr io.Writer, environ []str
 	if err != nil {
 		return writeError("run task set", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
-	return mutateManifest("run task set", opts.JSON, stdout, stderr, environ, func(manifest *Manifest, now time.Time) error {
+	result := mutateManifest("run task set", opts.JSON, stdout, stderr, environ, func(manifest *Manifest, now time.Time) error {
 		return manifest.SetChecklistItem(opts.ID, opts.Status, opts.Note, now)
 	})
+	if result == 0 {
+		// best-effort event log — don't fail the command if event log fails
+		now := nowFromEnvironment(environ)
+		store, _, _, storeErr := ResolveStore(mustGetwd(), environ, now)
+		if storeErr == nil {
+			data, _ := json.Marshal(map[string]string{"task_id": opts.ID, "status": opts.Status})
+			_ = AppendEvent(store.EventLogPath(), Event{
+				Ts:    now.Format(time.RFC3339),
+				Event: "task_status_change",
+				Data:  json.RawMessage(data),
+			})
+		}
+	}
+	return result
 }
 
 func runAudit(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
-	if len(args) == 0 || args[0] != "add" {
+	if len(args) == 0 {
 		jsonOutput := hasJSON(args)
-		return writeError("run audit", "usage", "expected audit subcommand: add", jsonOutput, stdout, stderr, 2)
+		return writeError("run audit", "usage", "expected audit subcommand: add | events", jsonOutput, stdout, stderr, 2)
 	}
-	opts, err := parseAuditAddOptions(args[1:])
+	switch args[0] {
+	case "add":
+		opts, err := parseAuditAddOptions(args[1:])
+		if err != nil {
+			return writeError("run audit add", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+		}
+		return mutateManifest("run audit add", opts.JSON, stdout, stderr, environ, func(manifest *Manifest, now time.Time) error {
+			return manifest.AddAuditItem(AuditItem{
+				Kind:        opts.Kind,
+				Name:        opts.Name,
+				Status:      opts.Status,
+				Summary:     opts.Summary,
+				ReceiptPath: opts.ReceiptPath,
+			}, now)
+		})
+	case "events":
+		return runAuditEvents(args[1:], stdout, stderr, environ)
+	default:
+		jsonOutput := hasJSON(args[1:])
+		return writeError("run audit", "usage", fmt.Sprintf("unknown audit subcommand: %s", args[0]), jsonOutput, stdout, stderr, 2)
+	}
+}
+
+func runAuditEvents(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {
+	jsonOutput := hasJSON(args)
+	now := nowFromEnvironment(environ)
+	store, _, _, err := ResolveStore(mustGetwd(), environ, now)
 	if err != nil {
-		return writeError("run audit add", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
+		return writeError("run audit events", "resolve-failed", err.Error(), jsonOutput, stdout, stderr, 1)
 	}
-	return mutateManifest("run audit add", opts.JSON, stdout, stderr, environ, func(manifest *Manifest, now time.Time) error {
-		return manifest.AddAuditItem(AuditItem{
-			Kind:        opts.Kind,
-			Name:        opts.Name,
-			Status:      opts.Status,
-			Summary:     opts.Summary,
-			ReceiptPath: opts.ReceiptPath,
-		}, now)
-	})
+	events, err := ReadEvents(store.EventLogPath())
+	if err != nil {
+		return writeError("run audit events", "read-failed", err.Error(), jsonOutput, stdout, stderr, 1)
+	}
+	if jsonOutput {
+		_ = json.NewEncoder(stdout).Encode(events)
+		return 0
+	}
+	for _, e := range events {
+		_, _ = fmt.Fprintf(stdout, "[%s] %s\n", e.Ts, e.Event)
+	}
+	return 0
 }
 
 func runClose(args []string, stdout io.Writer, stderr io.Writer, environ []string) int {

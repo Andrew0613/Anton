@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Andrew0613/Anton/internal/policy"
 )
 
 func TestCheckRunAndRepairPlan(t *testing.T) {
@@ -430,4 +432,140 @@ func hasCode(issues []struct {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Tests for evaluateFileContainsAll
+// ---------------------------------------------------------------------------
+
+func TestEvaluateFileContainsAllAllPresent(t *testing.T) {
+	testdata := filepath.Join("testdata", "file_contains_all")
+	rule := makeFileContainsAllRule("fca-all-present", filepath.Join(testdata, "present.txt"), []string{"token_one", "token_two"})
+	base := "."
+	issues := evaluateFileContainsAll(base, rule)
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %d: %v", len(issues), issues)
+	}
+}
+
+func TestEvaluateFileContainsAllOneTokenMissing(t *testing.T) {
+	testdata := filepath.Join("testdata", "file_contains_all")
+	rule := makeFileContainsAllRule("fca-one-missing", filepath.Join(testdata, "missing_token.txt"), []string{"token_one", "token_two"})
+	base := "."
+	issues := evaluateFileContainsAll(base, rule)
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %v", len(issues), issues)
+	}
+	if issues[0].Code != "token-missing" {
+		t.Fatalf("expected code token-missing, got %q", issues[0].Code)
+	}
+}
+
+func TestEvaluateFileContainsAllTwoTokensMissing(t *testing.T) {
+	testdata := filepath.Join("testdata", "file_contains_all")
+	rule := makeFileContainsAllRule("fca-two-missing", filepath.Join(testdata, "missing_token.txt"), []string{"token_two", "token_three"})
+	base := "."
+	issues := evaluateFileContainsAll(base, rule)
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues, got %d: %v", len(issues), issues)
+	}
+	for _, issue := range issues {
+		if issue.Code != "token-missing" {
+			t.Fatalf("expected code token-missing, got %q", issue.Code)
+		}
+	}
+}
+
+func TestEvaluateFileContainsAllFileMissing(t *testing.T) {
+	rule := makeFileContainsAllRule("fca-file-missing", "nonexistent/path/file.txt", []string{"token_one"})
+	base := "."
+	issues := evaluateFileContainsAll(base, rule)
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %v", len(issues), issues)
+	}
+	if issues[0].Code != "file-missing" {
+		t.Fatalf("expected code file-missing, got %q", issues[0].Code)
+	}
+}
+
+func makeFileContainsAllRule(ruleID string, path string, tokens []string) policy.Rule {
+	return policy.Rule{
+		RuleID:   ruleID,
+		Owner:    "test",
+		Category: "test",
+		Severity: "error",
+		Blocking: true,
+		Check: policy.CheckSpec{
+			Kind:   "file_contains_all",
+			Path:   path,
+			Tokens: tokens,
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for evaluateMarkdownHasSections
+// ---------------------------------------------------------------------------
+
+func TestEvaluateMarkdownHasSectionsAllPresent(t *testing.T) {
+	testdata := filepath.Join("testdata", "markdown_sections")
+	rule := makeMarkdownHasSectionsRule("mhs-all-present", filepath.Join(testdata, "complete.md"), "", []string{"Deliverables", "Execution Contract"})
+	base := "."
+	issues := evaluateMarkdownHasSections(base, rule)
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %d: %v", len(issues), issues)
+	}
+}
+
+func TestEvaluateMarkdownHasSectionsOneMissing(t *testing.T) {
+	testdata := filepath.Join("testdata", "markdown_sections")
+	rule := makeMarkdownHasSectionsRule("mhs-one-missing", filepath.Join(testdata, "missing_section.md"), "", []string{"Deliverables", "Execution Contract"})
+	base := "."
+	issues := evaluateMarkdownHasSections(base, rule)
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %v", len(issues), issues)
+	}
+	if issues[0].Code != "section-missing" {
+		t.Fatalf("expected code section-missing, got %q", issues[0].Code)
+	}
+}
+
+func TestEvaluateMarkdownHasSectionsPathPatternNoMatch(t *testing.T) {
+	rule := makeMarkdownHasSectionsRule("mhs-pattern-nomatch", "", "testdata/markdown_sections/nonexistent_*.md", []string{"Deliverables"})
+	base := "."
+	issues := evaluateMarkdownHasSections(base, rule)
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues for no-match pattern, got %d: %v", len(issues), issues)
+	}
+}
+
+func TestEvaluateMarkdownHasSectionsPathPatternMultiFile(t *testing.T) {
+	testdata := filepath.Join("testdata", "markdown_sections")
+	// pattern matches both complete.md and missing_section.md
+	rule := makeMarkdownHasSectionsRule("mhs-pattern-multi", "", filepath.Join(testdata, "*.md"), []string{"Execution Contract"})
+	base := "."
+	issues := evaluateMarkdownHasSections(base, rule)
+	// complete.md has "Execution Contract", missing_section.md does not → 1 issue
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue from multi-file pattern, got %d: %v", len(issues), issues)
+	}
+	if issues[0].Code != "section-missing" {
+		t.Fatalf("expected code section-missing, got %q", issues[0].Code)
+	}
+}
+
+func makeMarkdownHasSectionsRule(ruleID string, path string, pathPattern string, sections []string) policy.Rule {
+	return policy.Rule{
+		RuleID:   ruleID,
+		Owner:    "test",
+		Category: "test",
+		Severity: "error",
+		Blocking: true,
+		Check: policy.CheckSpec{
+			Kind:        "markdown_has_sections",
+			Path:        path,
+			PathPattern: pathPattern,
+			Sections:    sections,
+		},
+	}
 }

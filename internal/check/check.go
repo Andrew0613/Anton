@@ -19,7 +19,8 @@ import (
 )
 
 type options struct {
-	JSON bool
+	JSON    bool
+	Profile string
 }
 
 type ActionableIssue struct {
@@ -113,7 +114,7 @@ func runCheck(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 	if err != nil {
 		return writeError("check run", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
-	report, err := collect(environ)
+	report, err := collect(environ, opts.Profile)
 	if err != nil {
 		return writeError("check run", "check-run-failed", err.Error(), opts.JSON, stdout, stderr, 1)
 	}
@@ -129,7 +130,7 @@ func runRepairPlan(args []string, stdout io.Writer, stderr io.Writer, environ []
 	if err != nil {
 		return writeError("check repair-plan", "usage", err.Error(), opts.JSON, stdout, stderr, 2)
 	}
-	report, err := collect(environ)
+	report, err := collect(environ, opts.Profile)
 	if err != nil {
 		return writeError("check repair-plan", "check-repair-plan-failed", err.Error(), opts.JSON, stdout, stderr, 1)
 	}
@@ -167,7 +168,7 @@ func runRepairPlan(args []string, stdout io.Writer, stderr io.Writer, environ []
 	return writeResponse("check repair-plan", data, opts.JSON, stdout, exitCode)
 }
 
-func collect(environ []string) (runData, error) {
+func collect(environ []string, profile string) (runData, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return runData{}, err
@@ -197,7 +198,7 @@ func collect(environ []string) (runData, error) {
 	if resolved.Context.RepositoryRoot != "" {
 		base = resolved.Context.RepositoryRoot
 	}
-	for _, rule := range registry.Rules {
+	for _, rule := range filterRulesByProfile(registry.Rules, profile) {
 		if strings.TrimSpace(rule.Check.Kind) == "" {
 			continue
 		}
@@ -216,6 +217,14 @@ func collect(environ []string) (runData, error) {
 		}
 		if rule.Check.Kind == "state_projection_source_integrity" {
 			issues = append(issues, evaluateStateProjectionSourceIntegrity(base, rule, inventory.Tasks)...)
+			continue
+		}
+		if rule.Check.Kind == "file_contains_all" {
+			issues = append(issues, evaluateFileContainsAll(base, rule)...)
+			continue
+		}
+		if rule.Check.Kind == "markdown_has_sections" {
+			issues = append(issues, evaluateMarkdownHasSections(base, rule)...)
 			continue
 		}
 		evaluated, failed := evaluateRule(base, rule)
@@ -242,6 +251,20 @@ func collect(environ []string) (runData, error) {
 		},
 	}
 	return report, nil
+}
+
+func filterRulesByProfile(rules []policy.Rule, profile string) []policy.Rule {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return rules
+	}
+	selected := make([]policy.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if strings.TrimSpace(rule.Category) == profile {
+			selected = append(selected, rule)
+		}
+	}
+	return selected
 }
 
 func evaluateRule(base string, rule policy.Rule) (ActionableIssue, bool) {
@@ -303,6 +326,75 @@ func evaluateRule(base string, rule policy.Rule) (ActionableIssue, bool) {
 	}
 	issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
 	return issue, true
+}
+
+func evaluateFileContainsAll(base string, rule policy.Rule) []ActionableIssue {
+	target := filepath.Join(base, rule.Check.Path)
+	content, err := os.ReadFile(target)
+	if err != nil {
+		issue := actionableIssueFromRule(rule)
+		issue.Code = "file-missing"
+		issue.Message = fmt.Sprintf("file %s does not exist or cannot be read", rule.Check.Path)
+		issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
+		return []ActionableIssue{issue}
+	}
+	text := string(content)
+	var issues []ActionableIssue
+	for _, token := range rule.Check.Tokens {
+		if !strings.Contains(text, token) {
+			issue := actionableIssueFromRule(rule)
+			issue.Code = "token-missing"
+			issue.Message = fmt.Sprintf("file %s does not contain required token: %q", rule.Check.Path, token)
+			issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
+			issues = append(issues, issue)
+		}
+	}
+	return issues
+}
+
+func evaluateMarkdownHasSections(base string, rule policy.Rule) []ActionableIssue {
+	var paths []string
+	if rule.Check.PathPattern != "" {
+		pattern := filepath.Join(base, rule.Check.PathPattern)
+		matches, err := filepath.Glob(pattern)
+		if err == nil {
+			paths = matches
+		}
+	} else if rule.Check.Path != "" {
+		paths = []string{filepath.Join(base, rule.Check.Path)}
+	}
+
+	var issues []ActionableIssue
+	for _, filePath := range paths {
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue // skip unreadable files
+		}
+		// Parse H2 headings (lines starting with "## ")
+		found := map[string]bool{}
+		for _, line := range strings.Split(string(content), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "## ") {
+				heading := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+				found[heading] = true
+			}
+		}
+		// Compute relative path for message
+		rel := filePath
+		if r, err := filepath.Rel(base, filePath); err == nil {
+			rel = r
+		}
+		for _, section := range rule.Check.Sections {
+			if !found[section] {
+				issue := actionableIssueFromRule(rule)
+				issue.Code = "section-missing"
+				issue.Message = fmt.Sprintf("file %s is missing required section: %q", rel, section)
+				issue.Bucket = chooseBucket(issue, rule.ArchiveOnly)
+				issues = append(issues, issue)
+			}
+		}
+	}
+	return issues
 }
 
 func evaluateStateProjectionSourceIntegrity(base string, rule policy.Rule, tasks []state.TaskRecord) []ActionableIssue {
@@ -720,12 +812,18 @@ func fallback(value string, defaultValue string) string {
 
 func parseOptions(args []string) (options, error) {
 	opts := options{}
-	for _, arg := range args {
-		switch arg {
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
 		case "--json":
 			opts.JSON = true
+		case "--profile":
+			index++
+			if index >= len(args) {
+				return opts, fmt.Errorf("missing value for --profile")
+			}
+			opts.Profile = strings.TrimSpace(args[index])
 		default:
-			return opts, fmt.Errorf("unexpected argument: %s", arg)
+			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}
 	}
 	return opts, nil
@@ -733,8 +831,8 @@ func parseOptions(args []string) (options, error) {
 
 func usageText() string {
 	return `Usage:
-  anton check run [--json]
-  anton check repair-plan [--json]
+  anton check run [--profile PROFILE] [--json]
+  anton check repair-plan [--profile PROFILE] [--json]
 `
 }
 

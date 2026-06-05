@@ -87,6 +87,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		return runCockpit(args[1:], "workspace cleanup-plan", stdout, stderr, environ)
 	case "refs":
 		return runRefs(args[1:], stdout, stderr, environ)
+	case "worktrees":
+		return runWorktrees(args[1:], "workspace worktrees", stdout, stderr, environ)
 	case "prepare":
 		opts, err := parseOptions(args[1:])
 		if err != nil {

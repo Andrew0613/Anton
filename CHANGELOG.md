@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- add `anton workspace worktrees list|inspect|remove` for git worktree lifecycle management with safety classification, artifact detection, and dry-run removal
+- add `file_contains_all` check kind to verify all required tokens are present in a file
+- add `markdown_has_sections` check kind to verify required H2 headings across files matching a glob pattern
+- add `run-events.jsonl` append-only event log written alongside `run.json` on each task status change
+- add `anton run audit events` subcommand to read the event log
+- add `--check` flag to `anton task list` for repair-class annotation (authority_mismatch, compatibility_drift, projection_semantics, freshness_stale)
+- add `--freshness` / `--freshness --strict` flags to `anton task-state check` for freshness.status enforcement
+
+### Changed
+
+- extend `CheckSpec` with optional `Tokens []string`, `Sections []string`, and `PathPattern string` fields for the new check kinds
+
 ## v0.0.4 - 2026-05-20
 
 ### Added

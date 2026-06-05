@@ -97,7 +97,9 @@ type options struct {
 
 type checkOptions struct {
 	options
-	Schema string
+	Schema    string
+	Freshness bool
+	Strict    bool
 }
 
 type envOptions struct {
@@ -434,6 +436,32 @@ func runCheck(args []string, stdout io.Writer, stderr io.Writer, environ []strin
 				Detail: "status.yaml schema looks valid",
 			})
 			files = append(files, closureGateResults(statusPath, snapshot)...)
+			if opts.Freshness {
+				freshnessStatus := ""
+				if data, readErr := os.ReadFile(statusPath); readErr == nil {
+					var raw map[string]any
+					if yaml.Unmarshal(data, &raw) == nil {
+						if freshness, ok := mapValue(raw["freshness"]); ok {
+							freshnessStatus = stringFromMap(freshness, "status")
+						}
+					}
+				}
+				if freshnessStatus != "high" {
+					detail := fmt.Sprintf("freshness.status is %q, expected \"high\"", freshnessStatus)
+					if freshnessStatus == "" {
+						detail = "freshness.status field is missing or empty"
+					}
+					statusStr := "freshness-stale"
+					if opts.Strict {
+						statusStr = "invalid"
+					}
+					files = append(files, fileResult{
+						Path:   statusPath,
+						Status: statusStr,
+						Detail: detail,
+					})
+				}
+			}
 		}
 	} else if os.IsNotExist(statErr) {
 		files = append(files, fileResult{
@@ -971,6 +999,10 @@ func parseCheckOptions(args []string) (checkOptions, error) {
 			default:
 				return opts, fmt.Errorf("--schema must be one of: anton, auto, physedit-v1")
 			}
+		case "--freshness":
+			opts.Freshness = true
+		case "--strict":
+			opts.Strict = true
 		default:
 			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}

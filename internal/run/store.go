@@ -13,6 +13,7 @@ import (
 )
 
 const ManifestFilename = "run.json"
+const EventLogFilename = "run-events.jsonl"
 
 type Store struct {
 	bundleRoot  string
@@ -63,6 +64,10 @@ func (store Store) Path() string {
 
 func (store Store) ReceiptsDir() string {
 	return store.receiptsDir
+}
+
+func (store Store) EventLogPath() string {
+	return filepath.Join(store.bundleRoot, EventLogFilename)
 }
 
 func (store Store) WriteReceipt(kind string, name string, content []byte) (string, error) {

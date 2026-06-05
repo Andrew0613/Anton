@@ -29,11 +29,14 @@ type Rule struct {
 }
 
 type CheckSpec struct {
-	Kind     string `json:"kind" yaml:"kind"`
-	Path     string `json:"path,omitempty" yaml:"path"`
-	Contains string `json:"contains,omitempty" yaml:"contains"`
-	Field    string `json:"field,omitempty" yaml:"field"`
-	Equals   string `json:"equals,omitempty" yaml:"equals"`
+	Kind        string   `json:"kind" yaml:"kind"`
+	Path        string   `json:"path,omitempty" yaml:"path"`
+	PathPattern string   `json:"path_pattern,omitempty" yaml:"path_pattern"`
+	Contains    string   `json:"contains,omitempty" yaml:"contains"`
+	Tokens      []string `json:"tokens,omitempty" yaml:"tokens"`
+	Field       string   `json:"field,omitempty" yaml:"field"`
+	Equals      string   `json:"equals,omitempty" yaml:"equals"`
+	Sections    []string `json:"sections,omitempty" yaml:"sections"`
 }
 
 type Issue struct {
@@ -162,9 +165,16 @@ func normalizeRules(rules []Rule) []Rule {
 		rule.SafeCommand = strings.TrimSpace(rule.SafeCommand)
 		rule.Check.Kind = strings.TrimSpace(rule.Check.Kind)
 		rule.Check.Path = strings.TrimSpace(rule.Check.Path)
+		rule.Check.PathPattern = strings.TrimSpace(rule.Check.PathPattern)
 		rule.Check.Contains = strings.TrimSpace(rule.Check.Contains)
+		for i, t := range rule.Check.Tokens {
+			rule.Check.Tokens[i] = strings.TrimSpace(t)
+		}
 		rule.Check.Field = strings.TrimSpace(rule.Check.Field)
 		rule.Check.Equals = strings.TrimSpace(rule.Check.Equals)
+		for i, s := range rule.Check.Sections {
+			rule.Check.Sections[i] = strings.TrimSpace(s)
+		}
 		result = append(result, rule)
 	}
 	return result
@@ -246,6 +256,18 @@ func validateCheckSpec(rule Rule, label string, source string) []Issue {
 	case "frontmatter_field_present":
 		requirePath()
 		requireField()
+	case "file_contains_all":
+		requirePath()
+		if len(rule.Check.Tokens) == 0 {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-tokens-missing", File: source, Message: fmt.Sprintf("%s: check.tokens is required for %s", label, rule.Check.Kind), RepairHint: "set check.tokens"})
+		}
+	case "markdown_has_sections":
+		if rule.Check.Path == "" && rule.Check.PathPattern == "" {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-path-missing", File: source, Message: fmt.Sprintf("%s: check.path or check.path_pattern is required for %s", label, rule.Check.Kind), RepairHint: "set check.path or check.path_pattern"})
+		}
+		if len(rule.Check.Sections) == 0 {
+			issues = append(issues, Issue{Level: "error", Code: "policy-rule-check-sections-missing", File: source, Message: fmt.Sprintf("%s: check.sections is required for %s", label, rule.Check.Kind), RepairHint: "set check.sections"})
+		}
 	case "state_dual_read_parity", "state_projection_source_integrity":
 	default:
 	}

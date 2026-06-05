@@ -9,6 +9,7 @@ import (
 
 	"github.com/Andrew0613/Anton/internal/adapter"
 	"github.com/Andrew0613/Anton/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 type options struct {
@@ -16,18 +17,34 @@ type options struct {
 	TaskID   string
 	State    string
 	DualRead bool
+	Check    bool
+}
+
+type repairAnnotation struct {
+	TaskID        string   `json:"task_id"`
+	RepairNeeded  bool     `json:"repair_needed"`
+	RepairClasses []string `json:"repair_classes,omitempty"`
+	Blocking      bool     `json:"blocking"`
+}
+
+type checkSummary struct {
+	HardRepairCount int `json:"hard_repair_count"`
+	WarningCount    int `json:"warning_count"`
+	Total           int `json:"total"`
 }
 
 type commandData struct {
-	Adapter          string            `json:"adapter"`
-	WorkingDirectory string            `json:"working_directory"`
-	RepositoryRoot   string            `json:"repository_root,omitempty"`
-	StateRoot        string            `json:"state_root"`
-	TasksDir         string            `json:"tasks_dir"`
-	SourceRevision   string            `json:"source_revision,omitempty"`
-	Task             *state.TaskRecord `json:"task,omitempty"`
-	Inventory        *inventorySummary `json:"inventory,omitempty"`
-	Issues           []state.Issue     `json:"issues,omitempty"`
+	Adapter             string              `json:"adapter"`
+	WorkingDirectory    string              `json:"working_directory"`
+	RepositoryRoot      string              `json:"repository_root,omitempty"`
+	StateRoot           string              `json:"state_root"`
+	TasksDir            string              `json:"tasks_dir"`
+	SourceRevision      string              `json:"source_revision,omitempty"`
+	Task                *state.TaskRecord   `json:"task,omitempty"`
+	Inventory           *inventorySummary   `json:"inventory,omitempty"`
+	Issues              []state.Issue       `json:"issues,omitempty"`
+	CheckAnnotations    []repairAnnotation  `json:"check_annotations,omitempty"`
+	CheckSummary        *checkSummary       `json:"check_summary,omitempty"`
 }
 
 type inventorySummary struct {
@@ -146,6 +163,11 @@ func runList(args []string, stdout io.Writer, stderr io.Writer, environ []string
 		},
 		Issues: inventory.Issues,
 	}
+	if opts.Check {
+		annotations, summary := computeRepairAnnotations(selected)
+		data.CheckAnnotations = annotations
+		data.CheckSummary = &summary
+	}
 	exitCode := 0
 	if len(errorIssues(inventory.Issues)) > 0 {
 		exitCode = 1
@@ -194,6 +216,8 @@ func parseListOptions(args []string) (options, error) {
 			opts.State = strings.TrimSpace(args[index])
 		case "--dual-read":
 			opts.DualRead = true
+		case "--check":
+			opts.Check = true
 		default:
 			return opts, fmt.Errorf("unexpected argument: %s", args[index])
 		}
@@ -207,7 +231,7 @@ func parseListOptions(args []string) (options, error) {
 func usageText() string {
 	return `Usage:
   anton task resolve [TASK_ID|--task TASK_ID] [--dual-read] [--json]
-  anton task list [--state active|all] [--dual-read] [--json]
+  anton task list [--state active|all] [--check] [--dual-read] [--json]
 `
 }
 
@@ -232,6 +256,15 @@ func writeResponse(command string, data commandData, asJSON bool, stdout io.Writ
 	if len(data.Issues) > 0 {
 		_, _ = fmt.Fprintf(stdout, "Issues: %d\n", len(data.Issues))
 	}
+	if data.CheckSummary != nil {
+		_, _ = fmt.Fprintf(stdout, "Check: hard=%d warnings=%d total=%d\n",
+			data.CheckSummary.HardRepairCount, data.CheckSummary.WarningCount, data.CheckSummary.Total)
+		for _, ann := range data.CheckAnnotations {
+			if ann.RepairNeeded {
+				_, _ = fmt.Fprintf(stdout, "  %s: %s\n", ann.TaskID, strings.Join(ann.RepairClasses, ", "))
+			}
+		}
+	}
 	return exitCode
 }
 
@@ -252,6 +285,60 @@ func writeError(command string, code string, message string, asJSON bool, stdout
 	}
 	_, _ = fmt.Fprintf(stderr, "%s\n", message)
 	return exitCode
+}
+
+func computeRepairAnnotations(tasks []state.TaskRecord) ([]repairAnnotation, checkSummary) {
+	annotations := make([]repairAnnotation, 0, len(tasks))
+	summary := checkSummary{Total: len(tasks)}
+	for _, task := range tasks {
+		var classes []string
+		blocking := false
+		if task.TruthLocation != "docs_state_operational" {
+			classes = append(classes, "authority_mismatch")
+			blocking = true
+		}
+		if task.Lifecycle == "active" && !task.Active {
+			classes = append(classes, "projection_semantics")
+			blocking = true
+		}
+		if task.Freshness.Status != "" && task.Freshness.Status != "high" {
+			classes = append(classes, "freshness_stale")
+			blocking = true
+		}
+		if ps := readParityStatus(task.SourceFile); ps != "" && ps != "ok" && ps != "matched" {
+			classes = append(classes, "compatibility_drift")
+		}
+		needed := len(classes) > 0
+		if needed {
+			if blocking {
+				summary.HardRepairCount++
+			} else {
+				summary.WarningCount++
+			}
+		}
+		annotations = append(annotations, repairAnnotation{
+			TaskID:        task.TaskID,
+			RepairNeeded:  needed,
+			RepairClasses: classes,
+			Blocking:      blocking,
+		})
+	}
+	return annotations, summary
+}
+
+func readParityStatus(sourceFile string) string {
+	data, err := os.ReadFile(sourceFile)
+	if err != nil {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	if v, ok := raw["parity_status"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 func errorIssues(issues []state.Issue) []state.Issue {
