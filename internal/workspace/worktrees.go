@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -121,6 +122,38 @@ func inspectWorktree(path string) (WorktreeStatus, error) {
 	return buildWorktreeStatus(path, head, branch, false)
 }
 
+func inspectRegisteredWorktree(repoRoot string, path string) (WorktreeStatus, error) {
+	cleanTarget, err := normalizeWorktreePath(path)
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	list, err := listWorktrees(repoRoot)
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	for _, status := range list {
+		cleanPath, err := normalizeWorktreePath(status.Path)
+		if err != nil {
+			continue
+		}
+		if cleanPath == cleanTarget {
+			return status, nil
+		}
+	}
+	return WorktreeStatus{}, fmt.Errorf("target is not a registered non-main worktree: %s", path)
+}
+
+func normalizeWorktreePath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("worktree path is empty")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
 // buildWorktreeStatus populates a WorktreeStatus from path and pre-fetched git data.
 func buildWorktreeStatus(path string, head string, branch string, bare bool) (WorktreeStatus, error) {
 	status := WorktreeStatus{
@@ -149,7 +182,7 @@ func buildWorktreeStatus(path string, head string, branch string, bare bool) (Wo
 	// Artifacts.
 	for _, dir := range artifactDirs {
 		candidate := filepath.Join(path, dir)
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+		if info, statErr := os.Lstat(candidate); statErr == nil && info.IsDir() {
 			status.HasArtifacts = true
 			break
 		}
@@ -271,11 +304,17 @@ func runWorktreesRemove(args []string, command string, stdout io.Writer, stderr 
 	var remaining []string
 	for _, arg := range args {
 		switch arg {
+		case "--json":
+			// Worktree subcommands always emit JSON today; accept the global flag so
+			// callers do not accidentally turn it into the removal target.
 		case "--dry-run":
 			dryRun = true
 		case "--force":
 			force = true
 		default:
+			if strings.HasPrefix(arg, "-") {
+				return writeWorktreesError(command, "usage", fmt.Sprintf("unexpected argument: %s", arg), stdout, stderr)
+			}
 			remaining = append(remaining, arg)
 		}
 	}
@@ -291,7 +330,10 @@ func runWorktreesRemove(args []string, command string, stdout io.Writer, stderr 
 	}
 
 	if dryRun {
-		status, _ := inspectWorktree(path)
+		status, err := inspectRegisteredWorktree(repoRoot, path)
+		if err != nil {
+			return writeWorktreesError(command, "worktrees-inspect-failed", err.Error(), stdout, stderr)
+		}
 		payload := worktreesResponse{OK: true, Command: command, Single: &status}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")

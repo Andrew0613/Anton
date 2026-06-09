@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -157,6 +158,22 @@ func TestBuildWorktreeStatusNoArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildWorktreeStatusIgnoresArtifactSymlink(t *testing.T) {
+	dir := t.TempDir()
+	shared := t.TempDir()
+	if err := os.Symlink(shared, filepath.Join(dir, "data")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	status, _ := buildWorktreeStatus(dir, "", "", false)
+	if status.HasArtifacts {
+		t.Errorf("HasArtifacts = true, want false for shared data symlink")
+	}
+	if !status.SafeToRemove {
+		t.Errorf("SafeToRemove = false, want true for symlink-only artifact marker")
+	}
+}
+
 // --- Run dispatch test ---
 
 func TestWorkspaceWorktreesUnknownSubcommand(t *testing.T) {
@@ -224,5 +241,106 @@ func TestWorkspaceWorktreesRemoveMissingArg(t *testing.T) {
 	exitCode := Run([]string{"worktrees", "remove"}, &stdout, &stderr, nil)
 	if exitCode != 2 {
 		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+}
+
+func TestWorkspaceWorktreesRemoveDryRunAcceptsJSONFlag(t *testing.T) {
+	repo, worktree := createGitRepoWithWorktree(t)
+	restore := chdir(t, repo)
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"worktrees", "remove", "--dry-run", "--json", worktree}, &stdout, &stderr, nil)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	var payload worktreesResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("ok = false, want true: %+v", payload.Error)
+	}
+	if payload.Single == nil {
+		t.Fatalf("single = nil, want worktree status")
+	}
+	if filepath.Clean(payload.Single.Path) != filepath.Clean(worktree) {
+		t.Fatalf("path = %q, want %q", payload.Single.Path, worktree)
+	}
+}
+
+func TestWorkspaceWorktreesRemoveDryRunFailsForUnregisteredPath(t *testing.T) {
+	repo, _ := createGitRepoWithWorktree(t)
+	restore := chdir(t, repo)
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"worktrees", "remove", "--dry-run", "--json", filepath.Join(t.TempDir(), "missing")}, &stdout, &stderr, nil)
+	if exitCode == 0 {
+		t.Fatalf("exit code = 0, want failure\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+
+	var payload worktreesResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, stdout.String())
+	}
+	if payload.OK {
+		t.Fatalf("ok = true, want false")
+	}
+	if payload.Error == nil || payload.Error.Code != "worktrees-inspect-failed" {
+		t.Fatalf("error = %+v, want worktrees-inspect-failed", payload.Error)
+	}
+}
+
+func createGitRepoWithWorktree(t *testing.T) (string, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	worktree := filepath.Join(root, "feature")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "anton@example.test")
+	runGit(t, repo, "config", "user.name", "Anton Test")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "initial")
+	runGit(t, repo, "worktree", "add", "-b", "feature", worktree)
+	return repo, worktree
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+}
+
+func chdir(t *testing.T, dir string) func() {
+	t.Helper()
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	return func() {
+		if err := os.Chdir(original); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
 	}
 }
