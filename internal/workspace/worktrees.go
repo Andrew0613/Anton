@@ -214,13 +214,17 @@ func removeWorktree(path string, dryRun bool, force bool, repoRoot string) error
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	_, err := gitWorktreeCommand(repoRoot, args...)
+	_, err := gitWorktreeCommandWithTimeout(repoRoot, 60*time.Second, args...)
 	return err
 }
 
 // gitWorktreeCommand runs a git command and returns (output, error).
 func gitWorktreeCommand(path string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return gitWorktreeCommandWithTimeout(path, 10*time.Second, args...)
+}
+
+func gitWorktreeCommandWithTimeout(path string, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", path}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
