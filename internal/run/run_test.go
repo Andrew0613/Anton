@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -78,6 +79,62 @@ func TestStoreLoadForTaskRejectsMismatchedTaskID(t *testing.T) {
 
 	if _, err := store.LoadForTask("demo_task"); err == nil || !strings.Contains(err.Error(), "does not match active task") {
 		t.Fatalf("LoadForTask error = %v, want task mismatch", err)
+	}
+}
+
+func TestStoreUpdateForTaskSerializesConcurrentMutations(t *testing.T) {
+	root := t.TempDir()
+	bundleRoot := filepath.Join(root, ".anton", "tasks", "active", "demo_task")
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		t.Fatalf("mkdir bundle: %v", err)
+	}
+
+	store := NewStore(bundleRoot)
+	now := mustParseTime(t, fixedNow)
+	if _, err := store.Init("demo_task", now); err != nil {
+		t.Fatalf("Init returned error: %v", err)
+	}
+
+	const mutationCount = 24
+	var waitGroup sync.WaitGroup
+	errs := make(chan error, mutationCount)
+	for index := 0; index < mutationCount; index++ {
+		index := index
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			_, err := store.UpdateForTask("demo_task", now, func(manifest *Manifest) error {
+				time.Sleep(time.Duration(index%4) * time.Millisecond)
+				id := fmt.Sprintf("u%02d", index)
+				return manifest.AddChecklistItem(id, "Concurrent manifest update "+id, now)
+			})
+			errs <- err
+		}()
+	}
+	waitGroup.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("UpdateForTask returned error: %v", err)
+		}
+	}
+
+	loaded, err := store.LoadForTask("demo_task")
+	if err != nil {
+		t.Fatalf("LoadForTask returned error: %v", err)
+	}
+	if len(loaded.Checklist) != mutationCount {
+		t.Fatalf("checklist length = %d, want %d: %#v", len(loaded.Checklist), mutationCount, loaded.Checklist)
+	}
+	seen := map[string]bool{}
+	for _, item := range loaded.Checklist {
+		seen[item.ID] = true
+	}
+	for index := 0; index < mutationCount; index++ {
+		id := fmt.Sprintf("u%02d", index)
+		if !seen[id] {
+			t.Fatalf("missing checklist item %s in %#v", id, loaded.Checklist)
+		}
 	}
 }
 

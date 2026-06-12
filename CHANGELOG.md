@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- serialize `anton run` manifest mutations so concurrent CLI writers do not
+  lose checklist, audit, or close updates on the same task bundle
+
 ## v0.0.4 - 2026-05-20
 
 ### Added
