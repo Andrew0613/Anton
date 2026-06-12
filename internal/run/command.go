@@ -258,14 +258,10 @@ func mutateManifest(command string, jsonOutput bool, stdout io.Writer, stderr io
 	if err != nil {
 		return writeTaskBundleError(command, err, jsonOutput, stdout, stderr)
 	}
-	manifest, err := store.LoadForTask(taskIDFromBundle(bundle))
+	manifest, err := store.UpdateForTask(taskIDFromBundle(bundle), now, func(manifest *Manifest) error {
+		return mutate(manifest, now)
+	})
 	if err != nil {
-		return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), jsonOutput, stdout, stderr, 1)
-	}
-	if err := mutate(&manifest, now); err != nil {
-		return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), jsonOutput, stdout, stderr, 1)
-	}
-	if err := store.Save(manifest); err != nil {
 		return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), jsonOutput, stdout, stderr, 1)
 	}
 	return writeResponse(command, buildResponseData(resolved, bundle, store, manifest), jsonOutput, stdout)

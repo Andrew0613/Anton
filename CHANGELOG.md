@@ -16,6 +16,11 @@
 
 - extend `CheckSpec` with optional `Tokens []string`, `Sections []string`, and `PathPattern string` fields for the new check kinds
 
+### Fixed
+
+- serialize `anton run` manifest mutations so concurrent CLI writers do not
+  lose checklist, audit, or close updates on the same task bundle
+
 ## v0.0.4 - 2026-05-20
 
 ### Added

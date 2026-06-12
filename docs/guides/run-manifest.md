@@ -74,6 +74,10 @@ Every mutation should be explicit, task-scoped, JSON-serializable, and safe to
 include in a handoff. Missing task identity should fail with a structured error
 instead of creating anonymous state.
 
+Manifest mutations are serialized per task bundle. This prevents concurrent
+`anton run` CLI processes from overwriting each other's checklist, audit, or
+close updates when they target the same `run.json`.
+
 ## Planning Files
 
 For existing adopters, `task_plan.md`, `findings.md`, and `progress.md` may stay

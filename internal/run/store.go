@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Andrew0613/Anton/internal/adapter"
@@ -14,6 +16,10 @@ import (
 
 const ManifestFilename = "run.json"
 const EventLogFilename = "run-events.jsonl"
+const manifestLockPollInterval = 25 * time.Millisecond
+const manifestLockTimeout = 10 * time.Second
+
+var manifestMutexes sync.Map
 
 type Store struct {
 	bundleRoot  string
@@ -156,11 +162,45 @@ func (store Store) Init(taskID string, now time.Time) (Manifest, error) {
 	if err := store.validateSidecarPaths(); err != nil {
 		return Manifest{}, err
 	}
+	lock, err := store.acquireManifestLock()
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer lock.Release()
 	if store.Exists() {
 		return store.LoadForTask(taskID)
 	}
 	manifest, err := NewManifest(taskID, now)
 	if err != nil {
+		return Manifest{}, err
+	}
+	if err := store.Save(manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+func (store Store) UpdateForTask(taskID string, now time.Time, mutate func(*Manifest) error) (Manifest, error) {
+	if err := store.requireExistingBundle(); err != nil {
+		return Manifest{}, err
+	}
+	if err := store.validateSidecarPaths(); err != nil {
+		return Manifest{}, err
+	}
+	lock, err := store.acquireManifestLock()
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer lock.Release()
+
+	manifest, err := store.LoadForTask(taskID)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if mutate == nil {
+		return Manifest{}, fmt.Errorf("run manifest mutation is required")
+	}
+	if err := mutate(&manifest); err != nil {
 		return Manifest{}, err
 	}
 	if err := store.Save(manifest); err != nil {
@@ -213,6 +253,63 @@ func (store Store) Save(manifest Manifest) error {
 		return fmt.Errorf("replace manifest %s: %w", store.path, err)
 	}
 	return nil
+}
+
+type manifestLock struct {
+	file  *os.File
+	mutex *sync.Mutex
+}
+
+func (store Store) acquireManifestLock() (*manifestLock, error) {
+	mutex := store.localManifestMutex()
+	mutex.Lock()
+
+	file, err := os.Open(store.bundleRoot)
+	if err != nil {
+		mutex.Unlock()
+		return nil, fmt.Errorf("open task bundle root for run manifest lock: %w", err)
+	}
+	deadline := time.Now().Add(manifestLockTimeout)
+	for {
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &manifestLock{file: file, mutex: mutex}, nil
+		}
+		if !isLockBusy(err) {
+			_ = file.Close()
+			mutex.Unlock()
+			return nil, fmt.Errorf("lock run manifest bundle %s: %w", store.bundleRoot, err)
+		}
+		if time.Now().After(deadline) {
+			_ = file.Close()
+			mutex.Unlock()
+			return nil, fmt.Errorf("timed out waiting for run manifest lock: %s", store.bundleRoot)
+		}
+		time.Sleep(manifestLockPollInterval)
+	}
+}
+
+func (store Store) localManifestMutex() *sync.Mutex {
+	key := filepath.Clean(store.bundleRoot)
+	value, _ := manifestMutexes.LoadOrStore(key, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
+func (lock *manifestLock) Release() {
+	if lock == nil {
+		return
+	}
+	if lock.file != nil {
+		_ = syscall.Flock(int(lock.file.Fd()), syscall.LOCK_UN)
+		_ = lock.file.Close()
+	}
+	if lock.mutex != nil {
+		lock.mutex.Unlock()
+	}
+}
+
+func isLockBusy(err error) bool {
+	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
 }
 
 func (store Store) requireExistingBundle() error {
