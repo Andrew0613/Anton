@@ -3,6 +3,6 @@
   "command": "run task set",
   "error": {
     "code": "run-task-set-failed",
-    "message": "must be one of: pending, in_progress, blocked, done, dropped"
+    "message": "must be one of: pending, in_progress, blocked, done, dropped; complete/completed are accepted aliases for done"
   }
 }

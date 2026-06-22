@@ -81,8 +81,15 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, environ []string) in
 		_, _ = io.WriteString(stdout, usageText())
 		return 0
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown run command: %s\n\n%s", args[0], usageText())
-		return 2
+		jsonOutput := hasJSON(args[1:])
+		message := fmt.Sprintf("unknown run command: %s", args[0])
+		if args[0] == "check" {
+			message += "; use `anton run status` to inspect run manifest state"
+		}
+		if !jsonOutput {
+			message += "\n\n" + usageText()
+		}
+		return writeError("run", "usage", message, jsonOutput, stdout, stderr, 2)
 	}
 }
 
@@ -437,9 +444,8 @@ func writeError(command string, code string, message string, asJSON bool, stdout
 }
 
 func writeTaskBundleError(command string, err error, asJSON bool, stdout io.Writer, stderr io.Writer) int {
-	var taskIdentityErr adapter.TaskIdentityRequiredError
-	if errors.As(err, &taskIdentityErr) {
-		return writeError(command, "task-identity-required", taskIdentityErr.Error(), asJSON, stdout, stderr, 1)
+	if errors.Is(err, adapter.ErrTaskIdentityRequired) {
+		return writeError(command, "task-identity-required", err.Error(), asJSON, stdout, stderr, 1)
 	}
 	return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), asJSON, stdout, stderr, 1)
 }

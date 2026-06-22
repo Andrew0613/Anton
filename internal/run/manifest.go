@@ -191,19 +191,39 @@ func (manifest Manifest) Validate() error {
 }
 
 func ValidateChecklistStatus(status string) error {
-	status = strings.TrimSpace(status)
+	status = NormalizeChecklistStatus(status)
 	if slices.Contains(validChecklistStatuses, status) {
 		return nil
 	}
-	return fmt.Errorf("must be one of: %s", strings.Join(validChecklistStatuses, ", "))
+	return fmt.Errorf("must be one of: %s; complete/completed are accepted aliases for done", strings.Join(validChecklistStatuses, ", "))
 }
 
 func ValidateCloseStatus(status string) error {
-	status = strings.TrimSpace(status)
+	status = NormalizeCloseStatus(status)
 	if slices.Contains(validCloseStatuses, status) {
 		return nil
 	}
-	return fmt.Errorf("must be one of: %s", strings.Join(validCloseStatuses, ", "))
+	return fmt.Errorf("must be one of: %s; complete/completed are accepted aliases for done", strings.Join(validCloseStatuses, ", "))
+}
+
+func NormalizeChecklistStatus(status string) string {
+	status = strings.TrimSpace(status)
+	switch status {
+	case "complete", "completed":
+		return ChecklistDone
+	default:
+		return status
+	}
+}
+
+func NormalizeCloseStatus(status string) string {
+	status = strings.TrimSpace(status)
+	switch status {
+	case "complete", "completed":
+		return CloseStatusDone
+	default:
+		return status
+	}
 }
 
 func (manifest *Manifest) AddChecklistItem(id string, title string, now time.Time) error {
@@ -240,7 +260,7 @@ func (manifest *Manifest) SetChecklistItem(id string, status string, note string
 	if index < 0 {
 		return fmt.Errorf("checklist item %q not found", id)
 	}
-	manifest.Checklist[index].Status = strings.TrimSpace(status)
+	manifest.Checklist[index].Status = NormalizeChecklistStatus(status)
 	if value := strings.TrimSpace(note); value != "" {
 		manifest.Checklist[index].Notes = append(manifest.Checklist[index].Notes, value)
 	}
@@ -272,7 +292,7 @@ func (manifest *Manifest) AddAuditItem(item AuditItem, now time.Time) error {
 }
 
 func (manifest *Manifest) CloseRun(status string, summary string, now time.Time) error {
-	status = strings.TrimSpace(status)
+	status = NormalizeCloseStatus(status)
 	if err := ValidateCloseStatus(status); err != nil {
 		return err
 	}
@@ -292,7 +312,7 @@ func (manifest *Manifest) CloseRun(status string, summary string, now time.Time)
 func (manifest Manifest) ChecklistSummary() ChecklistSummary {
 	summary := ChecklistSummary{}
 	for _, item := range manifest.Checklist {
-		switch item.Status {
+		switch NormalizeChecklistStatus(item.Status) {
 		case ChecklistPending:
 			summary.Pending++
 		case ChecklistInProgress:

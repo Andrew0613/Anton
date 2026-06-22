@@ -397,6 +397,39 @@ func TestTaskStateTopicLayerCheckResolvesFromEnv(t *testing.T) {
 	}
 }
 
+func TestTaskStateTopicLayerMissingTopicReportsIdentityRequired(t *testing.T) {
+	repoRoot := makeTaskStateTempRepoRoot(t)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "anton.yaml"), ""+
+		"version: 1\n"+
+		"entrypoint:\n  path: AGENTS.md\n"+
+		"tasks:\n  root: project_progress\n  layout: topic-layer\n  status_schema: physedit-v1\n"+
+		"threads:\n  default_project_strategy: repo-root\n",
+	)
+	writeTaskStateFile(t, filepath.Join(repoRoot, "AGENTS.md"), "# Entry\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withTaskStateWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"init", "--json"}, &stdout, &stderr, []string{"ANTON_TASK_ID=demo_topic_task"})
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.Error == nil || payload.Error.Code != "task-identity-required" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if !strings.Contains(payload.Error.Message, "ANTON_TASK_TOPIC") {
+		t.Fatalf("message missing ANTON_TASK_TOPIC guidance: %q", payload.Error.Message)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestTaskStateTopicLayerCheckResolvesFromCWDInsideBundle(t *testing.T) {
 	_, bundleRoot := makeTopicLayerRepo(t)
 	inside := filepath.Join(bundleRoot, "notes")

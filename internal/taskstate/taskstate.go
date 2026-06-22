@@ -1522,9 +1522,8 @@ func writeError(command string, code string, message string, asJSON bool, stdout
 }
 
 func writeTaskBundleError(command string, err error, asJSON bool, stdout io.Writer, stderr io.Writer) int {
-	var taskIdentityErr adapter.TaskIdentityRequiredError
-	if errors.As(err, &taskIdentityErr) {
-		return writeError(command, "task-identity-required", taskIdentityErr.Error(), asJSON, stdout, stderr, 1)
+	if errors.Is(err, adapter.ErrTaskIdentityRequired) {
+		return writeError(command, "task-identity-required", err.Error(), asJSON, stdout, stderr, 1)
 	}
 	return writeError(command, strings.ReplaceAll(command, " ", "-")+"-failed", err.Error(), asJSON, stdout, stderr, 1)
 }

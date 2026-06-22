@@ -123,6 +123,9 @@ func (store Store) Load() (Manifest, error) {
 	}
 	content, err := os.ReadFile(store.path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return Manifest{}, fmt.Errorf("run manifest is missing at %s; run `anton run init` after `anton task-state init`", store.path)
+		}
 		return Manifest{}, fmt.Errorf("read %s: %w", store.path, err)
 	}
 	var manifest Manifest

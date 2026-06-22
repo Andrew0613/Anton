@@ -26,6 +26,19 @@ func (err TaskIdentityRequiredError) Unwrap() error {
 	return ErrTaskIdentityRequired
 }
 
+type TaskTopicRequiredError struct {
+	TasksRoot string
+	TaskID    string
+}
+
+func (err TaskTopicRequiredError) Error() string {
+	return fmt.Sprintf("topic-layer task identity required for %q; set ANTON_TASK_TOPIC to create a new topic-layer bundle, or run inside an existing %s/<topic>/tasks/active/%s bundle", err.TaskID, filepath.ToSlash(err.TasksRoot), err.TaskID)
+}
+
+func (err TaskTopicRequiredError) Unwrap() error {
+	return ErrTaskIdentityRequired
+}
+
 type Default struct {
 	Config Config
 }
@@ -495,7 +508,7 @@ func (definition Default) topicLayerTaskBundle(context Context, environ []string
 	values := envMap(environ)
 	topic := strings.TrimSpace(values["ANTON_TASK_TOPIC"])
 	if topic == "" {
-		return ResolvedTaskBundle{}, fmt.Errorf("topic-layer task bundle %q not found under %s; set ANTON_TASK_TOPIC to create a new topic-layer bundle", taskID, filepath.ToSlash(tasksRoot))
+		return ResolvedTaskBundle{}, TaskTopicRequiredError{TasksRoot: tasksRoot, TaskID: taskID}
 	}
 	if !safePathSegment(topic) {
 		return ResolvedTaskBundle{}, fmt.Errorf("invalid ANTON_TASK_TOPIC %q: must be one path segment", topic)

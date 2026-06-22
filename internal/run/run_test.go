@@ -223,6 +223,68 @@ func TestRunTaskAuditCloseJSONContract(t *testing.T) {
 	}
 }
 
+func TestRunTaskSetNormalizesCompleteAlias(t *testing.T) {
+	repoRoot := makeRunTempRepoRoot(t)
+	makeRunBundle(t, repoRoot, "demo_task")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withRunWorkingDirectory(t, repoRoot, func() int {
+		env := runEnv("demo_task")
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		if code := Run([]string{"task", "add", "--json", "--id", "u1", "--title", "Do work"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("task add exit code = %d, want 0", code)
+		}
+		return Run([]string{"task", "set", "--json", "--id", "u1", "--status", "complete"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Data == nil || payload.Data.ChecklistSummary.Done != 1 {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if got := payload.Data.Manifest.Checklist[0].Status; got != ChecklistDone {
+		t.Fatalf("persisted status = %q, want %q", got, ChecklistDone)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunCloseNormalizesCompletedAlias(t *testing.T) {
+	repoRoot := makeRunTempRepoRoot(t)
+	makeRunBundle(t, repoRoot, "demo_task")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withRunWorkingDirectory(t, repoRoot, func() int {
+		env := runEnv("demo_task")
+		if code := Run([]string{"init", "--json"}, io.Discard, io.Discard, env); code != 0 {
+			t.Fatalf("init exit code = %d, want 0", code)
+		}
+		return Run([]string{"close", "--json", "--status", "completed", "--summary", "finished"}, &stdout, &stderr, env)
+	})
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout=%s\nstderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Data == nil || payload.Data.Manifest.Close.Status != CloseStatusDone {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunInitRequiresExplicitTaskIdentity(t *testing.T) {
 	repoRoot := makeRunTempRepoRoot(t)
 
@@ -241,6 +303,49 @@ func TestRunInitRequiresExplicitTaskIdentity(t *testing.T) {
 	}
 	if payload.Error == nil || payload.Error.Code != "task-identity-required" {
 		t.Fatalf("payload = %+v", payload)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunCloseMissingManifestGuidesInit(t *testing.T) {
+	repoRoot := makeRunTempRepoRoot(t)
+	makeRunBundle(t, repoRoot, "demo_task")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withRunWorkingDirectory(t, repoRoot, func() int {
+		return Run([]string{"close", "--json", "--status", "done"}, &stdout, &stderr, runEnv("demo_task"))
+	})
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d, want 1", exitCode)
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.Error == nil || !strings.Contains(payload.Error.Message, "anton run init") {
+		t.Fatalf("payload missing init guidance: %+v", payload)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunCheckSuggestsStatusAsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run([]string{"check", "--json"}, &stdout, &stderr, nil)
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2", exitCode)
+	}
+	var payload response
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v\n%s", err, stdout.String())
+	}
+	if payload.Error == nil || payload.Error.Code != "usage" || !strings.Contains(payload.Error.Message, "anton run status") {
+		t.Fatalf("unexpected payload: %+v", payload)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q", stderr.String())
