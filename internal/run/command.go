@@ -479,11 +479,12 @@ func usageText() string {
   anton run status [--json]
   anton run task list [--json]
   anton run task add --id ID --title TITLE [--json]
-  anton run task set --id ID --status STATUS [--note NOTE] [--json]
+  anton run task set --id ID --status pending|in_progress|blocked|done|dropped [--note NOTE] [--json]
   anton run audit add --kind KIND --name NAME --status STATUS [--summary SUMMARY] [--receipt-path PATH] [--json]
-  anton run close --status STATUS [--summary SUMMARY] [--json]
+  anton run close --status open|review|done|blocked|canceled [--summary SUMMARY] [--json]
 
 Run manifests are passive sidecars stored as run.json in an existing Anton task bundle.
+The CLI accepts complete/completed as aliases for done and persists done.
 `
 }
 

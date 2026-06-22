@@ -55,8 +55,13 @@ Representative schema:
 }
 ```
 
-`mode` is `sidecar` for this slice. Status values should stay small:
-`pending`, `in_progress`, `blocked`, `done`, and `dropped`.
+`mode` is `sidecar` for this slice. Checklist status values should stay small:
+`pending`, `in_progress`, `blocked`, `done`, and `dropped`. Close status values
+are `open`, `review`, `done`, `blocked`, and `canceled`.
+
+Anton persists the canonical value `done`. For CLI input, `complete` and
+`completed` are accepted aliases for `done` on checklist and close status
+commands.
 
 ## Commands
 
@@ -73,6 +78,10 @@ anton run close --status done --summary "Ready for handoff" --json
 Every mutation should be explicit, task-scoped, JSON-serializable, and safe to
 include in a handoff. Missing task identity should fail with a structured error
 instead of creating anonymous state.
+
+If `run.json` is missing, run-state mutation commands fail with a message that
+points to `anton run init`. Use `anton run status --json` to inspect an existing
+run manifest; `anton run check` is not part of the run command surface.
 
 Manifest mutations are serialized per task bundle. This prevents concurrent
 `anton run` CLI processes from overwriting each other's checklist, audit, or

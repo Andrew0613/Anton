@@ -262,6 +262,12 @@ tasks:
   layout: topic-layer
 ```
 
+When a topic-layer repo initializes a new task, set both `ANTON_TASK_ID` and
+`ANTON_TASK_TOPIC`. If Anton finds `ANTON_TASK_ID` but cannot locate an existing
+bundle and `ANTON_TASK_TOPIC` is missing, the command fails with
+`task-identity-required` and points at the missing topic identity instead of
+creating an ambiguous bundle.
+
 Non-native status schemas must be declared explicitly, for example
 `status_schema: physedit-v1`. Anton can read compatible summaries through the
 adapter, but lifecycle mutation commands are only enabled for the native Anton
@@ -352,7 +358,14 @@ anton run audit add --kind KIND --name NAME --status STATUS [--summary SUMMARY] 
 anton run close --status open|review|done|blocked|canceled [--summary SUMMARY] [--json]
 ```
 
-Use these to manage passive run manifests under the active task bundle.
+Use these to manage passive run manifests under the active task bundle. If a
+run manifest is missing, inspect with `anton run status --json` or create it
+with `anton run init --json`. `anton run check` is not a command; JSON callers
+receive a usage error that points to `anton run status`.
+
+Run state persists the canonical close/checklist value `done`. For CLI input,
+`complete` and `completed` are accepted aliases and are normalized to `done` in
+`run.json`.
 
 ### Evidence and Memory
 
